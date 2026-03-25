@@ -1,10 +1,12 @@
 import { create } from "zustand";
+import { ARTILLERY_CONFIGS } from "../constants/artillery";
 import {
   type MilitaryBranch,
   type OwnedCommander,
   getArchetype,
   getCommander,
 } from "../constants/commanders";
+import { INTERCEPTOR_CONFIGS } from "../constants/interceptors";
 import { MISSILE_CONFIGS } from "../constants/missiles";
 import { GEODESIC_TILES } from "../utils/geodesicGrid";
 
@@ -276,6 +278,11 @@ const ALL_PLOTS = generatePlots();
 const INITIAL_ARSENAL_INVENTORY: Record<string, number> = Object.fromEntries(
   MISSILE_CONFIGS.map((m) => [m.id, m.qty]),
 );
+const INITIAL_ARTILLERY_INVENTORY: Record<string, number> = Object.fromEntries(
+  ARTILLERY_CONFIGS.map((a) => [a.id, a.qty]),
+);
+const INITIAL_INTERCEPTOR_INVENTORY: Record<string, number> =
+  Object.fromEntries(INTERCEPTOR_CONFIGS.map((i) => [i.id, i.qty]));
 
 interface GameState {
   plots: PlotData[];
@@ -298,6 +305,9 @@ interface GameState {
   rankStats: RankStats;
   equippedMissileId: string | null;
   arsenalInventory: Record<string, number>;
+  artilleryInventory: Record<string, number>;
+  interceptorInventory: Record<string, number>;
+  assignedInterceptors: Record<number, string>;
   ownedCommanders: OwnedCommander[];
   ownedCommanderIds: string[];
   commanderUpgrades: Record<string, number>;
@@ -328,6 +338,8 @@ interface GameState {
   removeCommanderFromPlot: (plotId: number) => void;
   setEquippedMissile: (id: string) => void;
   fireArsenalMissile: (missileId: string) => void;
+  fireArtillery: (artilleryId: string) => void;
+  assignInterceptorToPlot: (plotId: number, interceptorId: string) => void;
   purchaseArchetype: (archetypeId: MilitaryBranch) => boolean;
   promoteCommander: (instanceId: string) => boolean;
   purchaseCommander: (commanderId: string) => boolean;
@@ -376,6 +388,9 @@ export const useGameStore = create<GameState>((set, get) => ({
   rankStats: { missionsLaunched: 0, plotsOwned: 0, combatWins: 0 },
   equippedMissileId: "ICBM_PHANTOM",
   arsenalInventory: { ...INITIAL_ARSENAL_INVENTORY },
+  artilleryInventory: { ...INITIAL_ARTILLERY_INVENTORY },
+  interceptorInventory: { ...INITIAL_INTERCEPTOR_INVENTORY },
+  assignedInterceptors: {},
   ownedCommanders: [],
   ownedCommanderIds: [],
   commanderUpgrades: {},
@@ -399,6 +414,36 @@ export const useGameStore = create<GameState>((set, get) => ({
       rankStats: {
         ...s.rankStats,
         missionsLaunched: s.rankStats.missionsLaunched + 1,
+      },
+    })),
+
+  fireArtillery: (artilleryId) =>
+    set((s) => ({
+      artilleryInventory: {
+        ...s.artilleryInventory,
+        [artilleryId]: Math.max(
+          0,
+          (s.artilleryInventory[artilleryId] ?? 0) - 1,
+        ),
+      },
+      rankStats: {
+        ...s.rankStats,
+        missionsLaunched: s.rankStats.missionsLaunched + 1,
+      },
+    })),
+
+  assignInterceptorToPlot: (plotId, interceptorId) =>
+    set((s) => ({
+      assignedInterceptors: {
+        ...s.assignedInterceptors,
+        [plotId]: interceptorId,
+      },
+      interceptorInventory: {
+        ...s.interceptorInventory,
+        [interceptorId]: Math.max(
+          0,
+          (s.interceptorInventory[interceptorId] ?? 0) - 1,
+        ),
       },
     })),
 

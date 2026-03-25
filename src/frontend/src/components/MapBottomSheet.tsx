@@ -16,6 +16,8 @@ import { useState } from "react";
 import type { MissileConfig } from "../constants/missiles";
 import { MISSILE_CONFIGS } from "../constants/missiles";
 import { useArsenalAudio } from "../hooks/useArsenalAudio";
+import { useLaunchMissile } from "../hooks/useLaunchMissile";
+import { usePurchasePlot } from "../hooks/usePurchasePlot";
 import { type SubParcel, useGameStore } from "../store/gameStore";
 import BuildingPicker from "./BuildingPicker";
 
@@ -270,13 +272,35 @@ function QuickLaunchPanel({
 }) {
   const arsenalInventory = useGameStore((s) => s.arsenalInventory);
   const { playMissileAudio } = useArsenalAudio();
-  const fireArsenalMissile = useGameStore((s) => s.fireArsenalMissile);
+  const { launchMissile, isLaunching } = useLaunchMissile();
+  const [firingId, setFiringId] = useState<string | null>(null);
+  const [statusMap, setStatusMap] = useState<
+    Record<string, { success: boolean; message: string }>
+  >({});
 
   const available = MISSILE_CONFIGS.filter(
     (m) => (arsenalInventory[m.id] ?? 0) > 0,
   ).slice(0, 3);
 
   if (available.length === 0) return null;
+
+  async function handleQuickFire(missile: MissileConfig) {
+    if (firingId) return; // prevent double-tap while one is in flight
+    setFiringId(missile.id);
+    playMissileAudio(missile.id, "launch");
+    onFireMissile(missile);
+    const result = await launchMissile(missile);
+    setStatusMap((prev) => ({ ...prev, [missile.id]: result }));
+    // Clear status after 3s
+    setTimeout(() => {
+      setStatusMap((prev) => {
+        const next = { ...prev };
+        delete next[missile.id];
+        return next;
+      });
+    }, 3000);
+    setFiringId(null);
+  }
 
   return (
     <div
@@ -305,74 +329,91 @@ function QuickLaunchPanel({
       <div
         style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 2 }}
       >
-        {available.map((missile) => (
-          <div
-            key={missile.id}
-            style={{
-              flexShrink: 0,
-              background: "rgba(0,0,0,0.3)",
-              border: `1px solid ${missile.accentColor}55`,
-              borderRadius: 6,
-              padding: "6px 8px",
-              minWidth: 90,
-            }}
-          >
+        {available.map((missile) => {
+          const status = statusMap[missile.id];
+          const isFiring = firingId === missile.id;
+          return (
             <div
+              key={missile.id}
               style={{
-                fontSize: 8,
-                fontWeight: 700,
-                color: missile.accentColor,
-                letterSpacing: 0.5,
-                fontFamily: "monospace",
-                marginBottom: 4,
-                whiteSpace: "nowrap",
+                flexShrink: 0,
+                background: "rgba(0,0,0,0.3)",
+                border: `1px solid ${missile.accentColor}55`,
+                borderRadius: 6,
+                padding: "6px 8px",
+                minWidth: 90,
               }}
             >
-              {missile.name}
-            </div>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                gap: 4,
-              }}
-            >
-              <span
+              <div
                 style={{
                   fontSize: 8,
-                  color: CYAN_DIM,
-                  fontFamily: "monospace",
-                }}
-              >
-                ×{arsenalInventory[missile.id] ?? 0}
-              </span>
-              <button
-                type="button"
-                data-ocid={`map.quicklaunch.${missile.id.toLowerCase()}.button`}
-                onClick={() => {
-                  fireArsenalMissile(missile.id);
-                  playMissileAudio(missile.id, "launch");
-                  onFireMissile(missile);
-                }}
-                style={{
-                  fontSize: 7,
                   fontWeight: 700,
-                  letterSpacing: 1,
-                  padding: "3px 6px",
-                  borderRadius: 3,
-                  background: "rgba(239,68,68,0.15)",
-                  border: "1px solid #ef4444",
-                  color: "#ef4444",
-                  cursor: "pointer",
+                  color: missile.accentColor,
+                  letterSpacing: 0.5,
                   fontFamily: "monospace",
+                  marginBottom: 4,
+                  whiteSpace: "nowrap",
                 }}
               >
-                FIRE
-              </button>
+                {missile.name}
+              </div>
+              {status && (
+                <div
+                  style={{
+                    fontSize: 7,
+                    color: status.success ? "#22c55e" : "#ef4444",
+                    fontFamily: "monospace",
+                    marginBottom: 3,
+                    letterSpacing: 0.5,
+                  }}
+                >
+                  {status.success ? "✓ LAUNCHED" : "✗ FAILED"}
+                </div>
+              )}
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: 4,
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 8,
+                    color: CYAN_DIM,
+                    fontFamily: "monospace",
+                  }}
+                >
+                  ×{arsenalInventory[missile.id] ?? 0}
+                </span>
+                <button
+                  type="button"
+                  data-ocid={`map.quicklaunch.${missile.id.toLowerCase()}.button`}
+                  onClick={() => handleQuickFire(missile)}
+                  disabled={isFiring || isLaunching}
+                  style={{
+                    fontSize: 7,
+                    fontWeight: 700,
+                    letterSpacing: 1,
+                    padding: "3px 6px",
+                    borderRadius: 3,
+                    background: isFiring
+                      ? "rgba(239,68,68,0.25)"
+                      : "rgba(239,68,68,0.15)",
+                    border: "1px solid #ef4444",
+                    color: "#ef4444",
+                    cursor: isFiring ? "not-allowed" : "pointer",
+                    fontFamily: "monospace",
+                    opacity: isFiring ? 0.6 : 1,
+                  }}
+                >
+                  {isFiring ? "⋯" : "FIRE"}
+                </button>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -390,16 +431,17 @@ export default function MapBottomSheet({
   onFireMissile,
 }: MapBottomSheetProps) {
   const [pickerSlot, setPickerSlot] = useState<number | null>(null);
-  const [purchasing, setPurchasing] = useState(false);
+  const [purchaseError, setPurchaseError] = useState<string | null>(null);
 
   const selectedPlotId = useGameStore((s) => s.selectedPlotId);
   const plots = useGameStore((s) => s.plots);
   const player = useGameStore((s) => s.player);
   const getSubParcels = useGameStore((s) => s.getSubParcels);
-  const purchasePlot = useGameStore((s) => s.purchasePlot);
   const setTargetPlotId = useGameStore((s) => s.setTargetPlotId);
   const setPlotHoverCard = useGameStore((s) => s.setPlotHoverCard);
   const commanderAssignments = useGameStore((s) => s.commanderAssignments);
+
+  const { purchasePlot, isPurchasing } = usePurchasePlot();
 
   const plot =
     selectedPlotId !== null
@@ -421,13 +463,12 @@ export default function MapBottomSheet({
 
   const hasSilo = subParcels.some((sp) => sp.buildingType === "MISSILE_SILO");
 
-  function handlePurchase() {
-    if (!plot || purchasing) return;
+  async function handlePurchase() {
+    if (!plot || isPurchasing) return;
     if (player.frntBalance < 100) return;
-    setPurchasing(true);
-    setTimeout(() => {
-      purchasePlot(plot.id);
-      setPurchasing(false);
+    setPurchaseError(null);
+    const result = await purchasePlot(plot.id);
+    if (result.success) {
       onClose();
       focusOnPlot(plot.lat, plot.lng, controlsRef);
       setPlotHoverCard({
@@ -437,7 +478,9 @@ export default function MapBottomSheet({
         nextStep:
           "Open Command Center to track FRNTR generation. Build a Silo to attack.",
       });
-    }, 800);
+    } else {
+      setPurchaseError(result.message);
+    }
   }
 
   function handleBuild() {
@@ -695,7 +738,7 @@ export default function MapBottomSheet({
                   type="button"
                   data-ocid="map.primary_button"
                   onClick={handlePurchase}
-                  disabled={purchasing || player.frntBalance < 100}
+                  disabled={isPurchasing || player.frntBalance < 100}
                   style={{
                     ...actionBtnStyle(
                       player.frntBalance < 100
@@ -703,24 +746,20 @@ export default function MapBottomSheet({
                         : "#00ffcc",
                       player.frntBalance < 100
                         ? "rgba(0,255,204,0.04)"
-                        : purchasing
+                        : isPurchasing
                           ? "rgba(0,255,204,0.06)"
                           : "rgba(0,255,204,0.12)",
                     ),
-                    opacity: player.frntBalance < 100 || purchasing ? 0.6 : 1,
+                    opacity: player.frntBalance < 100 || isPurchasing ? 0.6 : 1,
                     cursor:
-                      player.frntBalance < 100 || purchasing
+                      player.frntBalance < 100 || isPurchasing
                         ? "not-allowed"
                         : "pointer",
                   }}
                 >
-                  {purchasing
-                    ? "PROCESSING..."
-                    : player.frntBalance < 100
-                      ? "PURCHASE PLOT — 100 FRNTR"
-                      : "PURCHASE PLOT — 100 FRNTR"}
+                  {isPurchasing ? "PROCESSING…" : "PURCHASE PLOT — 100 FRNTR"}
                 </button>
-                {player.frntBalance < 100 && (
+                {(player.frntBalance < 100 || purchaseError) && (
                   <div
                     data-ocid="map.error_state"
                     style={{
@@ -732,7 +771,7 @@ export default function MapBottomSheet({
                       fontFamily: "monospace",
                     }}
                   >
-                    INSUFFICIENT FRNTR
+                    {purchaseError ?? "INSUFFICIENT FRNTR"}
                   </div>
                 )}
               </div>

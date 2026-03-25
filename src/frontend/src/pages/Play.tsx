@@ -21,6 +21,7 @@ import Navbar from "../components/Navbar";
 import PlotHoverCard from "../components/PlotHoverCard";
 import SmokeTestPanel from "../components/SmokeTestPanel";
 import type { MissileConfig } from "../constants/missiles";
+import { usePlayerSync } from "../hooks/usePlayerSync";
 import { useGameStore } from "../store/gameStore";
 
 const CYAN = "#00ffcc";
@@ -622,6 +623,7 @@ function BottomSheet({
 
 export default function Play() {
   const controlsRef = useRef<any>(null);
+  usePlayerSync();
   const [activeTab, setActiveTab] = useState<string | null>(null);
   const [missileActive, setMissileActive] = useState(false);
   const [showCountdown, setShowCountdown] = useState(false);

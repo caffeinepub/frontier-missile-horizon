@@ -1,145 +1,42 @@
 # Frontier: Missile Horizon
 
 ## Current State
-
-- `generatePlots()` in `gameStore.ts` generates only 200 random lat/lng points using a phyllotaxis spiral — not a proper geodesic grid.
-- `HexGrid` component renders `LineSegments` outlines derived from those 200 points. With only 200 tiles the globe surface is mostly empty.
-- `HexHighlights` rebuilds a `BufferGeometry` per hover/selection event — no InstancedMesh.
-- `findNearestPlot(worldPoint)` in `EarthSphere` converts the world-space hit point to lat/lng, then searches by Euclidean lat/lng distance. It does NOT transform the hit point into the globe group's local space before searching, so every click is wrong once the globe has rotated.
-- Globe radius is 1.0. HexGrid tiles render at radius 1.001–1.002.
+- ARSENAL tab has 6 missiles (ICBM-PHANTOM, TOMAHAWK, HELLFIRE, JAVELIN, SENTINEL-400, VIPER-120)
+- ArsenalSheet.tsx renders a flat 2-column grid of missile cards + detail view
+- missiles.ts defines MissileConfig and MISSILE_CONFIGS
+- Backend main.mo has launchMissile() that accepts specific missileType strings
+- No artillery or interceptor weapon types exist yet
 
 ## Requested Changes (Diff)
 
 ### Add
-- `src/frontend/src/utils/geodesicGrid.ts` — new utility module:
-  - `buildGeodesicGrid(freq: number): GeodesicTile[]` — icosahedral subdivision at frequency `freq`, returns ~`10*freq²+2` tiles (freq=32 → 10,242 tiles). Each tile: `{ id, lat, lng, nx, ny, nz }` (nx/ny/nz are normalized sphere coordinates).
-  - `buildPositionCache(tiles: GeodesicTile[]): Float32Array` — flat packed `[x,y,z, x,y,z, ...]` for fast dot-product search.
-  - `findNearestTile(nx: number, ny: number, nz: number, cache: Float32Array): number` — linear scan with max dot product, returns tile index. O(n) over 10K items ~0.1ms, acceptable for click/throttled hover events.
-- `PLOT_POSITION_CACHE` exported from `gameStore.ts` — the `Float32Array` for use by the globe component.
+- 4 Artillery weapons: HIMARS-R, PALADIN-H, MLRS-X, EXCALIBUR-P
+- 3 Interceptor weapons: IRON-DOME-F, THAAD-X, AEGIS-S
+- New weapon interfaces: ArtilleryConfig, InterceptorConfig (extending base WeaponConfig)
+- New constants files: artillery.ts, interceptors.ts
+- ARSENAL tab sub-tabs: MISSILES | ARTILLERY | INTERCEPTORS
+- Artillery: FRNTR consumed on fire, unique VFX (ripple fire, shell arc, area burst)
+- Interceptors: passive/auto-defend when assigned to silo, FRNTR consumed per successful intercept
+- Interceptor assignment state in gameStore (which plots have interceptors assigned)
+- Auto-intercept logic hook (useInterceptor.ts) that checks incoming combat events and auto-fires
+- Backend: new weapon type entries in launchMissile switch for all 7 new weapons
+- Backend: interceptor assignment and auto-intercept resolution logic
 
 ### Modify
-- **`src/frontend/src/store/gameStore.ts`**:
-  - Replace `generatePlots()` body: import and call `buildGeodesicGrid(32)`, map each `GeodesicTile` to `PlotData` (preserving all existing PlotData fields). AI faction owners should be assigned every ~853rd and ~787th tile so density is proportional.
-  - Export `PLOT_POSITION_CACHE = buildPositionCache(GEODESIC_TILES)` at module level.
-- **`src/frontend/src/components/GlobeCanvas.tsx`**:
-  - Replace `HexGrid` (LineSegments) and `HexHighlights` (per-event geometry rebuild) with a single **`GlobeHexGrid`** component using `THREE.InstancedMesh`.
-  - Replace `findNearestPlot` inside `EarthSphere`: transform `e.point` (world space) into globe-local space via `globeRef.current.worldToLocal(point.clone())`, normalize it, then call `findNearestTile` with `PLOT_POSITION_CACHE`.
+- missiles.ts: extract shared WeaponConfig base type; keep MISSILE_CONFIGS as-is
+- ArsenalSheet.tsx: add sub-tab navigation (MISSILES | ARTILLERY | INTERCEPTORS); each tab shows its weapon grid; detail view adapts to weapon type
+- gameStore.ts: add artilleryInventory, interceptorInventory, assignedInterceptors maps
+- main.mo: extend launchMissile switch to include 7 new weapon IDs; add assignInterceptor() and resolveInterceptors() functions
 
 ### Remove
-- Old `HexGrid` function (LineSegments, 200-plot based).
-- Old `HexHighlights` function (per-event BufferGeometry rebuild).
-- Old `buildFilledHexGeometry` helper (no longer needed).
-- Old `generatePlots()` body content (200-plot random loop).
+- Nothing removed
 
 ## Implementation Plan
 
-### 1. `src/frontend/src/utils/geodesicGrid.ts` (new file)
-
-```
-const PHI = (1+sqrt(5))/2
-ICO_VERTS: 12 normalized icosahedron vertices
-ICO_FACES: 20 triangle face index triples
-
-buildGeodesicGrid(freq):
-  for each ICO_FACE [a,b,c]:
-    for s in [0..freq], t in [0..freq-s]:
-      u = freq-s-t
-      p = (Va*s + Vb*t + Vc*u) / freq  → normalize → project to unit sphere
-      key = round(nx*1e4) + ',' + round(ny*1e4) + ',' + round(nz*1e4)
-      deduplicate via Map<string, GeodesicTile>
-  return Array.from(seen.values())
-  → produces 10,242 unique tile positions for freq=32
-
-buildPositionCache(tiles):
-  Float32Array of length tiles.length*3
-  tiles[i] → [nx, ny, nz] at offset i*3
-
-findNearestTile(nx, ny, nz, cache):
-  linear scan: dot = cache[i*3]*nx + cache[i*3+1]*ny + cache[i*3+2]*nz
-  return index of maximum dot (= minimum angle from query point)
-```
-
-### 2. `gameStore.ts` changes
-
-```
-import { buildGeodesicGrid, buildPositionCache } from '../utils/geodesicGrid'
-
-const GEODESIC_TILES = buildGeodesicGrid(32)  // 10,242 tiles, runs once at module load
-export const PLOT_POSITION_CACHE = buildPositionCache(GEODESIC_TILES)
-
-function generatePlots(): PlotData[] {
-  return GEODESIC_TILES.map((tile, i) => ({
-    id: i,
-    lat: tile.lat,
-    lng: tile.lng,
-    biome: randomBiome(i),
-    richness: 1 + (i % 5),
-    owner: i % 853 === 0 ? 'NEXUS-7' : i % 787 === 0 ? 'KRONOS' : null,
-    iron: 0, fuel: 0, crystal: 0,
-    defenses: { turrets: 0, shields: 0, walls: 0 },
-  }))
-}
-```
-
-### 3. `GlobeCanvas.tsx` — `GlobeHexGrid` InstancedMesh
-
-Hex geometry (created once with useMemo):
-- Flat hexagon in XZ plane (y=0), +Y is outward normal
-- 6 triangles: center + 2 adjacent corners per triangle
-- Circumradius HEX_R = 0.0195 (sized for 10K tiles on unit sphere, ~4% gap)
-- Slightly offset above sphere: position radius = 1.001
-
-Instance matrix setup (runs once in useEffect after mount):
-```
-for each tile i:
-  normal = new Vector3(nx, ny, nz)
-  quat.setFromUnitVectors(Y_AXIS, normal)  // rotate flat hex face to point outward
-  matrix.makeRotationFromQuaternion(quat)
-  matrix.setPosition(normal * 1.001)
-  mesh.setMatrixAt(i, matrix)
-  mesh.setColorAt(i, BASE_COLOR)  // dim cyan-teal, opacity handled by material
-mesh.instanceMatrix.needsUpdate = true
-mesh.instanceColor.needsUpdate = true
-```
-
-Color update (useEffect on [hoveredPlotId, selectedPlotId, ownedPlots]):
-```
-reset all to BASE_COLOR
-for owned: setColorAt(id, OWNED_COLOR)   // green
-if hovered: setColorAt(id, HOVER_COLOR)  // gold
-if selected: setColorAt(id, SELECTED_COLOR) // cyan
-mesh.instanceColor.needsUpdate = true
-```
-
-Material: `MeshBasicMaterial` with `transparent: true`, `opacity: 0.18`, `vertexColors: true`, `depthWrite: false`, `side: DoubleSide`.
-
-This replaces both old `HexGrid` and `HexHighlights` with one InstancedMesh draw call.
-
-### 4. Fix `findNearestPlot` in `EarthSphere`
-
-```typescript
-import { findNearestTile, PLOT_POSITION_CACHE } from '../utils/geodesicGrid'
-// ... (PLOT_POSITION_CACHE from gameStore or geodesicGrid)
-
-function findNearestPlot(worldPoint: THREE.Vector3): number {
-  // CRITICAL: transform world-space hit point into globe-local space
-  // This accounts for the globe's current rotation
-  const local = globeRef.current
-    ? worldPoint.clone().applyMatrix4(
-        new THREE.Matrix4().copy(globeRef.current.matrixWorld).invert()
-      )
-    : worldPoint.clone()
-  // Normalize to unit direction on sphere
-  local.normalize()
-  return findNearestTile(local.x, local.y, local.z, PLOT_POSITION_CACHE)
-}
-```
-
-Alternatively use `globeRef.current.worldToLocal(point.clone())` then `.normalize()`.
-
-### Performance Notes
-- `buildGeodesicGrid(32)` runs once at module load (~50ms), result is frozen.
-- `findNearestTile` at 10K tiles: ~0.1ms per call. Hover is already throttled to 50ms intervals in the existing code — fine.
-- InstancedMesh: single draw call for all 10,242 tiles vs 10,242 separate mesh calls.
-- Color updates: writing 30KB Float32Array + GPU upload every 50ms hover tick is acceptable.
-- `instanceMatrix.needsUpdate` is only set in the one-time setup effect, NOT in the color update effect — avoids expensive matrix re-upload on every hover.
+1. Add artillery.ts constant with ArtilleryConfig type and 4 artillery configs (HIMARS-R, PALADIN-H, MLRS-X, EXCALIBUR-P) — unique VFX, FRNTR costs, trajectories
+2. Add interceptors.ts constant with InterceptorConfig type and 3 interceptor configs (IRON-DOME-F, THAAD-X, AEGIS-S) — passive auto stats, intercept %, FRNTR cost per intercept
+3. Update gameStore.ts to include artilleryInventory, interceptorInventory, assignedInterceptors
+4. Update backend main.mo to handle new weapon IDs and add assignInterceptor() query
+5. Update ArsenalSheet.tsx to add sub-tab navigation and render each tab's weapon grid/detail view
+6. Add useFireArtillery.ts hook (mirrors useLaunchMissile)
+7. Add useInterceptor.ts hook for auto-intercept logic display
