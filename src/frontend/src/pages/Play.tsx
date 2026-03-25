@@ -10,10 +10,10 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import CommandCenter from "../components/CommandCenter";
 import CommandPanel from "../components/CommandPanel";
+import CommanderStore from "../components/CommanderStore";
 import CountdownOverlay from "../components/CountdownOverlay";
 import GlobeCanvas from "../components/GlobeCanvas";
 import LeftSidebarHUD from "../components/LeftSidebarHUD";
-import LieutenantRankCard from "../components/LieutenantRankCard";
 import MapBottomSheet from "../components/MapBottomSheet";
 import Navbar from "../components/Navbar";
 import PlotHoverCard from "../components/PlotHoverCard";
@@ -22,7 +22,7 @@ import { useGameStore } from "../store/gameStore";
 
 const CYAN = "#00ffcc";
 const CYAN_DIM = "rgba(0,255,204,0.35)";
-const GOLD = "#ffd700";
+const _GOLD = "#ffd700";
 const BORDER = "rgba(0,255,204,0.22)";
 const TEXT = "#e0f4ff";
 
@@ -41,39 +41,6 @@ const NAV_ITEMS = [
   { id: "intel", label: "INTEL", Icon: Radio },
   { id: "commander", label: "COMMANDER", Icon: Shield },
   { id: "more", label: "MORE", Icon: MoreHorizontal },
-];
-
-const COMMANDERS = [
-  {
-    name: "NOVA PRIME",
-    atk: 85,
-    def: 72,
-    rarity: "LEGENDARY",
-    image: "/assets/generated/commander-nova-prime-transparent.dim_300x300.png",
-  },
-  {
-    name: "IRON CLAW",
-    atk: 70,
-    def: 90,
-    rarity: "EPIC",
-    image: "/assets/generated/commander-iron-claw-transparent.dim_300x300.png",
-  },
-  {
-    name: "PHANTOM OPS",
-    atk: 95,
-    def: 55,
-    rarity: "LEGENDARY",
-    image:
-      "/assets/generated/commander-phantom-ops-transparent.dim_300x300.png",
-  },
-  {
-    name: "VOID HUNTER",
-    atk: 62,
-    def: 81,
-    rarity: "RARE",
-    image:
-      "/assets/generated/commander-void-hunter-transparent.dim_300x300.png",
-  },
 ];
 
 interface TopBarProps {
@@ -298,338 +265,6 @@ function BottomNavBar({ activeTab, onTabClick }: BottomNavProps) {
   );
 }
 
-function CommanderSheet() {
-  const player = useGameStore((s) => s.player);
-  const selectCommander = useGameStore((s) => s.selectCommander);
-  const assignCommanderToPlot = useGameStore((s) => s.assignCommanderToPlot);
-  const removeCommanderFromPlot = useGameStore(
-    (s) => s.removeCommanderFromPlot,
-  );
-  const commanderAssignments = useGameStore((s) => s.commanderAssignments);
-  const activeCommander = player.commanderType;
-  const [expandedAssign, setExpandedAssign] = useState<string | null>(null);
-
-  return (
-    <div>
-      {/* Rank Card — always shown at top of COMMANDER tab */}
-      <LieutenantRankCard />
-
-      <div style={{ padding: "0 12px 12px" }}>
-        <div
-          style={{
-            fontSize: 8.5,
-            color: CYAN_DIM,
-            letterSpacing: 1.5,
-            marginBottom: 4,
-          }}
-        >
-          SELECT ACTIVE COMMANDER NFT
-        </div>
-        <div
-          data-ocid="commander.panel"
-          style={{
-            fontSize: 8,
-            color: activeCommander ? CYAN : "rgba(0,255,204,0.4)",
-            letterSpacing: 1,
-            marginBottom: 12,
-            fontFamily: "monospace",
-          }}
-        >
-          {activeCommander
-            ? `ACTIVE COMMANDER: ${activeCommander}`
-            : "NO COMMANDER SELECTED"}
-        </div>
-        <div
-          style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}
-        >
-          {COMMANDERS.map((c, i) => {
-            const isActive = activeCommander === c.name;
-            return (
-              <div
-                key={c.name}
-                data-ocid={`commander.item.${i + 1}`}
-                style={{
-                  background: isActive
-                    ? "rgba(0,255,204,0.08)"
-                    : "rgba(0,255,204,0.04)",
-                  border: isActive
-                    ? `1px solid ${CYAN}`
-                    : `1px solid ${BORDER}`,
-                  borderRadius: 8,
-                  padding: "10px",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 7,
-                  alignItems: "center",
-                  boxShadow: isActive ? "0 0 16px rgba(0,255,204,0.5)" : "none",
-                  transition: "all 0.2s",
-                }}
-              >
-                {/* Hex avatar portrait */}
-                <div
-                  style={{
-                    width: 60,
-                    height: 60,
-                    clipPath:
-                      "polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)",
-                    overflow: "hidden",
-                    border: `1px solid ${isActive ? CYAN : `${CYAN}44`}`,
-                    flexShrink: 0,
-                  }}
-                >
-                  <img
-                    src={c.image}
-                    alt={c.name}
-                    style={{
-                      width: "100%",
-                      height: "100%",
-                      objectFit: "cover",
-                      objectPosition: "center top",
-                      display: "block",
-                    }}
-                  />
-                </div>
-                <div
-                  style={{
-                    fontSize: 9,
-                    fontWeight: 700,
-                    color: isActive ? CYAN : TEXT,
-                    letterSpacing: 0.5,
-                    textAlign: "center",
-                  }}
-                >
-                  {c.name}
-                </div>
-                <div
-                  style={{ display: "flex", gap: 6, justifyContent: "center" }}
-                >
-                  <span style={{ fontSize: 8, color: "#ef4444" }}>
-                    ATK {c.atk}
-                  </span>
-                  <span style={{ fontSize: 8, color: "#3b82f6" }}>
-                    DEF {c.def}
-                  </span>
-                </div>
-                <div
-                  style={{
-                    fontSize: 7.5,
-                    padding: "2px 8px",
-                    borderRadius: 3,
-                    background:
-                      c.rarity === "LEGENDARY"
-                        ? "rgba(255,215,0,0.1)"
-                        : "rgba(168,85,247,0.1)",
-                    border: `1px solid ${
-                      c.rarity === "LEGENDARY" ? `${GOLD}66` : "#a855f766"
-                    }`,
-                    color: c.rarity === "LEGENDARY" ? GOLD : "#a855f7",
-                    letterSpacing: 0.5,
-                  }}
-                >
-                  {c.rarity}
-                </div>
-                <div
-                  style={{
-                    fontSize: 7.5,
-                    color: "#22c55e",
-                    letterSpacing: 0.5,
-                  }}
-                >
-                  • NFT IN WALLET
-                </div>
-                {isActive ? (
-                  <div
-                    data-ocid={`commander.item.${i + 1}.button`}
-                    style={{
-                      width: "100%",
-                      padding: "5px",
-                      background: `${CYAN}18`,
-                      border: `1px solid ${CYAN}66`,
-                      borderRadius: 4,
-                      color: CYAN,
-                      fontSize: 8,
-                      fontWeight: 700,
-                      letterSpacing: 1,
-                      textAlign: "center",
-                      fontFamily: "monospace",
-                    }}
-                  >
-                    ✓ ACTIVE
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    data-ocid={`commander.item.${i + 1}.button`}
-                    onClick={() => selectCommander(c.name, c.atk, c.def)}
-                    style={{
-                      width: "100%",
-                      padding: "5px",
-                      background: "transparent",
-                      border: "1px solid #ef444466",
-                      borderRadius: 4,
-                      color: "#ef4444",
-                      fontSize: 8,
-                      fontWeight: 700,
-                      letterSpacing: 1,
-                      cursor: "pointer",
-                      fontFamily: "monospace",
-                    }}
-                  >
-                    SELECT TO PLAY
-                  </button>
-                )}
-                {/* DEPLOY / ASSIGN TO PLOT */}
-                {isActive && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setExpandedAssign(
-                          expandedAssign === c.name ? null : c.name,
-                        )
-                      }
-                      style={{
-                        width: "100%",
-                        padding: "5px",
-                        background: "transparent",
-                        border: `1px solid ${CYAN}44`,
-                        borderRadius: 4,
-                        color: CYAN,
-                        fontSize: 8,
-                        fontWeight: 700,
-                        letterSpacing: 1,
-                        cursor: "pointer",
-                        fontFamily: "monospace",
-                        marginTop: 2,
-                      }}
-                    >
-                      DEPLOY {expandedAssign === c.name ? "▴" : "▾"}
-                    </button>
-                    {expandedAssign === c.name && (
-                      <div
-                        style={{
-                          width: "100%",
-                          background: "rgba(0,255,204,0.03)",
-                          border: `1px solid ${BORDER}`,
-                          borderRadius: 6,
-                          padding: "8px 6px",
-                          marginTop: 4,
-                        }}
-                      >
-                        <div
-                          style={{
-                            fontSize: 7.5,
-                            color: CYAN_DIM,
-                            letterSpacing: 1.5,
-                            fontFamily: "monospace",
-                            marginBottom: 6,
-                          }}
-                        >
-                          ASSIGN TO PLOT
-                        </div>
-                        {player.plotsOwned.length === 0 ? (
-                          <div
-                            style={{
-                              fontSize: 8,
-                              color: "rgba(0,255,204,0.3)",
-                              fontFamily: "monospace",
-                            }}
-                          >
-                            No plots owned yet
-                          </div>
-                        ) : (
-                          <div
-                            style={{
-                              display: "flex",
-                              flexDirection: "column",
-                              gap: 4,
-                            }}
-                          >
-                            {player.plotsOwned.map((pid) => {
-                              const assigned =
-                                commanderAssignments[pid] === c.name;
-                              return (
-                                <div
-                                  key={pid}
-                                  style={{
-                                    display: "flex",
-                                    alignItems: "center",
-                                    justifyContent: "space-between",
-                                    minHeight: 36,
-                                    padding: "0 4px",
-                                    borderBottom: `1px solid ${BORDER}`,
-                                  }}
-                                >
-                                  <span
-                                    style={{
-                                      fontSize: 8,
-                                      color: assigned
-                                        ? CYAN
-                                        : "rgba(0,255,204,0.6)",
-                                      fontFamily: "monospace",
-                                    }}
-                                  >
-                                    PLOT #{pid}
-                                  </span>
-                                  {assigned ? (
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        removeCommanderFromPlot(pid)
-                                      }
-                                      style={{
-                                        fontSize: 7.5,
-                                        color: CYAN,
-                                        background: `${CYAN}18`,
-                                        border: `1px solid ${CYAN}66`,
-                                        borderRadius: 3,
-                                        padding: "3px 6px",
-                                        cursor: "pointer",
-                                        fontFamily: "monospace",
-                                        letterSpacing: 0.5,
-                                      }}
-                                    >
-                                      ASSIGNED ✓
-                                    </button>
-                                  ) : (
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        assignCommanderToPlot(pid, c.name)
-                                      }
-                                      style={{
-                                        fontSize: 7.5,
-                                        color: CYAN,
-                                        background: "transparent",
-                                        border: `1px solid ${CYAN}66`,
-                                        borderRadius: 3,
-                                        padding: "3px 6px",
-                                        cursor: "pointer",
-                                        fontFamily: "monospace",
-                                        letterSpacing: 0.5,
-                                      }}
-                                    >
-                                      ASSIGN
-                                    </button>
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function SheetContent({
   tab,
   onClose,
@@ -747,7 +382,7 @@ function SheetContent({
   }
 
   if (tab === "commander") {
-    return <CommanderSheet />;
+    return <CommanderStore />;
   }
 
   // MORE = settings
@@ -977,6 +612,15 @@ export default function Play() {
   const selectedPlotId = useGameStore((s) => s.selectedPlotId);
   const plotHoverCard = useGameStore((s) => s.plotHoverCard);
   const setPlotHoverCard = useGameStore((s) => s.setPlotHoverCard);
+  const player = useGameStore((s) => s.player);
+  const [purchaseToast, setPurchaseToast] = useState<{
+    plotId: number;
+    rate: number;
+  } | null>(null);
+  const purchaseToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const prevPlotsOwnedLen = useRef(player.plotsOwned.length);
 
   const handleTabClick = (id: string) =>
     setActiveTab((prev) => (prev === id ? null : id));
@@ -996,6 +640,21 @@ export default function Play() {
     if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
     bannerTimerRef.current = setTimeout(() => setShowStrikeBanner(false), 2500);
   }, []);
+
+  useEffect(() => {
+    const currentLen = player.plotsOwned.length;
+    if (currentLen > prevPlotsOwnedLen.current) {
+      const newPlotId = player.plotsOwned[currentLen - 1];
+      setPurchaseToast({ plotId: newPlotId, rate: 50 });
+      if (purchaseToastTimerRef.current)
+        clearTimeout(purchaseToastTimerRef.current);
+      purchaseToastTimerRef.current = setTimeout(
+        () => setPurchaseToast(null),
+        3000,
+      );
+    }
+    prevPlotsOwnedLen.current = currentLen;
+  }, [player.plotsOwned]);
 
   return (
     <div
@@ -1123,6 +782,60 @@ export default function Play() {
           nextStep={plotHoverCard.nextStep}
           onDismiss={() => setPlotHoverCard(null)}
         />
+      )}
+
+      {/* Purchase success toast */}
+      {purchaseToast && (
+        <div
+          data-ocid="map.success_state"
+          style={{
+            position: "fixed",
+            bottom: 80,
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 70,
+            background: "rgba(4,12,24,0.95)",
+            backdropFilter: "blur(12px)",
+            WebkitBackdropFilter: "blur(12px)",
+            border: "1px solid rgba(0,255,204,0.45)",
+            borderTop: "2px solid #00ffcc",
+            borderRadius: 8,
+            padding: "10px 20px",
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            whiteSpace: "nowrap",
+            boxShadow: "0 4px 24px rgba(0,255,204,0.18)",
+            animation: "slideUpFadeIn 0.3s ease",
+          }}
+        >
+          <span style={{ color: "#00ffcc", fontSize: 13, fontWeight: 700 }}>
+            ✓
+          </span>
+          <span
+            style={{
+              color: "#00ffcc",
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: 2,
+              fontFamily: "monospace",
+            }}
+          >
+            PLOT #{purchaseToast.plotId} ACQUIRED
+          </span>
+          <span style={{ color: "rgba(0,255,204,0.45)", fontSize: 9 }}>·</span>
+          <span
+            style={{
+              color: "#ffd700",
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: 1.5,
+              fontFamily: "monospace",
+            }}
+          >
+            +{purchaseToast.rate} FRNTR/DAY
+          </span>
+        </div>
       )}
 
       <div

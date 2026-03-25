@@ -311,8 +311,9 @@ export default function MapBottomSheet({
       setPlotHoverCard({
         plotId: plot.id,
         owner: player.principal ?? "You",
-        action: "PURCHASING",
-        nextStep: "Plot purchased! Start building.",
+        action: "TERRITORY ACQUIRED",
+        nextStep:
+          "Open Command Center to track FRNTR generation. Build a Silo to attack.",
       });
     }, 800);
   }
