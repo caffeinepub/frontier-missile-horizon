@@ -730,6 +730,10 @@ export default function Play() {
       <CommandCenter
         open={commandCenterOpen}
         onClose={() => setCommandCenterOpen(false)}
+        onOpenCommanderStore={() => {
+          setCommandCenterOpen(false);
+          setActiveTab("commander");
+        }}
       />
 
       {showCountdown && <CountdownOverlay onLaunchReady={handleLaunchReady} />}
