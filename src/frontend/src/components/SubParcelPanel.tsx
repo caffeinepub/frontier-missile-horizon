@@ -16,7 +16,7 @@ import {
   getArchetype,
   getCurrentRank,
 } from "../constants/commanders";
-import { useGameStore } from "../store/gameStore";
+import { type PlotSpecialization, useGameStore } from "../store/gameStore";
 import type { PlayerRank, SubParcel } from "../store/gameStore";
 import BuildingPicker from "./BuildingPicker";
 
@@ -50,6 +50,32 @@ const CYAN = "#00ffcc";
 const BG = "rgba(2,10,20,0.92)";
 const BORDER = "rgba(0,255,204,0.22)";
 const TEXT = "#e0f4ff";
+
+const SPEC_CONFIG: Record<
+  PlotSpecialization,
+  { color: string; label: string; buff: string }
+> = {
+  TRADING_DEPOT: {
+    color: "#f59e0b",
+    label: "TRADING DEPOT",
+    buff: "+10% FRNTR from combat wins",
+  },
+  ENERGY_TECH: {
+    color: "#3b82f6",
+    label: "ENERGY & TECH",
+    buff: "Dome Shield -10% damage taken",
+  },
+  ARMORY: {
+    color: "#ef4444",
+    label: "ARMORY",
+    buff: "+5% hit target accuracy",
+  },
+  RESOURCES: {
+    color: "#22c55e",
+    label: "RESOURCES",
+    buff: "+15% mineral yield",
+  },
+};
 
 const HEX_CLIP =
   "polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)";
@@ -521,6 +547,9 @@ export default function SubParcelPanel() {
   const rankStats = useGameStore((s) => s.rankStats);
   const playerRank = derivePlayerRank(rankStats.combatWins);
 
+  const plots = useGameStore((s) => s.plots);
+  const upgradeStorage = useGameStore((s) => s.upgradeStorage);
+  const getNetworkBonus = useGameStore((s) => s.getNetworkBonus);
   const [pickerSubId, setPickerSubId] = useState<number | null>(null);
   const parcelsRef = useRef<SubParcel[]>([]);
 
@@ -536,6 +565,10 @@ export default function SubParcelPanel() {
   }
 
   const parcels = parcelsRef.current;
+  const currentPlot =
+    selectedPlotId !== null ? plots.find((p) => p.id === selectedPlotId) : null;
+  const specialization = currentPlot?.specialization ?? null;
+  const networkBonus = getNetworkBonus();
 
   return (
     <>
@@ -583,17 +616,91 @@ export default function SubParcelPanel() {
             flexShrink: 0,
           }}
         >
-          <span
-            style={{
-              fontSize: 11,
-              fontFamily: "monospace",
-              color: CYAN,
-              letterSpacing: 2,
-              fontWeight: 700,
-            }}
-          >
-            SUB-PARCELS — PLOT #{selectedPlotId ?? "--"}
-          </span>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <span
+              style={{
+                fontSize: 11,
+                fontFamily: "monospace",
+                color: CYAN,
+                letterSpacing: 2,
+                fontWeight: 700,
+              }}
+            >
+              SUB-PARCELS — PLOT #{selectedPlotId ?? "--"}
+            </span>
+            <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+              {specialization && (
+                <span
+                  data-ocid="subparcel.specialization.toggle"
+                  style={{
+                    fontSize: 8,
+                    padding: "2px 7px",
+                    borderRadius: 3,
+                    background: `${SPEC_CONFIG[specialization].color}22`,
+                    border: `1px solid ${SPEC_CONFIG[specialization].color}66`,
+                    color: SPEC_CONFIG[specialization].color,
+                    fontFamily: "monospace",
+                    letterSpacing: 1,
+                    fontWeight: 700,
+                  }}
+                >
+                  {SPEC_CONFIG[specialization].label} ·{" "}
+                  {SPEC_CONFIG[specialization].buff}
+                </span>
+              )}
+              {networkBonus && (
+                <span
+                  data-ocid="subparcel.network_linked.success_state"
+                  style={{
+                    fontSize: 8,
+                    padding: "2px 7px",
+                    borderRadius: 3,
+                    background: "rgba(0,255,204,0.08)",
+                    border: "1px solid rgba(0,255,204,0.4)",
+                    color: CYAN,
+                    fontFamily: "monospace",
+                    letterSpacing: 1,
+                    fontWeight: 700,
+                  }}
+                >
+                  ⧡ NETWORK LINKED
+                </span>
+              )}
+              {specialization === "RESOURCES" &&
+                player.resourceStorageCap < 500 && (
+                  <button
+                    type="button"
+                    data-ocid="subparcel.upgrade_storage.button"
+                    onClick={() =>
+                      selectedPlotId !== null && upgradeStorage(selectedPlotId)
+                    }
+                    disabled={player.frntBalance < 150}
+                    style={{
+                      fontSize: 7,
+                      padding: "2px 7px",
+                      borderRadius: 3,
+                      background:
+                        player.frntBalance >= 150
+                          ? "rgba(34,197,94,0.12)"
+                          : "rgba(34,197,94,0.04)",
+                      border: `1px solid ${player.frntBalance >= 150 ? "#22c55e66" : "#22c55e22"}`,
+                      color:
+                        player.frntBalance >= 150
+                          ? "#22c55e"
+                          : "rgba(34,197,94,0.4)",
+                      fontFamily: "monospace",
+                      letterSpacing: 1,
+                      fontWeight: 700,
+                      cursor:
+                        player.frntBalance >= 150 ? "pointer" : "not-allowed",
+                    }}
+                  >
+                    UPGRADE STORAGE +50 → 150 FRNTR (cap:{" "}
+                    {player.resourceStorageCap})
+                  </button>
+                )}
+            </div>
+          </div>
           <button
             type="button"
             data-ocid="subparcel.close_button"
@@ -715,6 +822,7 @@ export default function SubParcelPanel() {
           plotId={selectedPlotId}
           subId={pickerSubId}
           onClose={() => setPickerSubId(null)}
+          specialization={specialization}
         />
       )}
     </>

@@ -32,6 +32,12 @@ export const BIOME_COLORS: Record<Biome, string> = {
   Toxic: "#7dba3a",
 };
 
+export type PlotSpecialization =
+  | "TRADING_DEPOT"
+  | "ENERGY_TECH"
+  | "ARMORY"
+  | "RESOURCES";
+
 export const FACTION_COLORS: Record<string, string> = {
   "NEXUS-7": "#EF4444",
   KRONOS: "#8B5CF6",
@@ -76,6 +82,7 @@ export interface PlotData {
   crystal: number;
   rareEarth: number; // accumulated rare earth
   defenses: { turrets: number; shields: number; walls: number };
+  specialization: PlotSpecialization | null;
 }
 
 export interface PlayerData {
@@ -92,6 +99,7 @@ export interface PlayerData {
   faction: string | null;
   weaponInventory: Record<string, number>;
   mockIcpBalance: number;
+  resourceStorageCap: number;
 }
 
 export interface CombatEntry {
@@ -231,6 +239,7 @@ function generatePlots(): PlotData[] {
     crystal: 0,
     rareEarth: 0,
     defenses: { turrets: 0, shields: 0, walls: 0 },
+    specialization: null,
   }));
 }
 
@@ -359,6 +368,9 @@ interface GameState {
   promoteCommander: (instanceId: string) => boolean;
   purchaseCommander: (commanderId: string) => boolean;
   upgradeCommander: (commanderId: string, frntrCost: number) => boolean;
+  setPlotSpecialization: (plotId: number, spec: PlotSpecialization) => void;
+  upgradeStorage: (plotId: number) => void;
+  getNetworkBonus: () => boolean;
 }
 
 export const useGameStore = create<GameState>((set, get) => ({
@@ -384,6 +396,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       "ORBITAL RAIL": 1,
     },
     mockIcpBalance: 5.0,
+    resourceStorageCap: 200,
   },
   selectedPlotId: null,
   selectedWorldPoint: null,
@@ -507,6 +520,14 @@ export const useGameStore = create<GameState>((set, get) => ({
     if (!plot) return null;
     const regenActive = Date.now() < plot.regenActiveUntil;
     const yld = getMineralYield(plot.biome, plot.efficiency, regenActive);
+    const resourcesMult = plot.specialization === "RESOURCES" ? 1.15 : 1.0;
+    const storageCap = state.player.resourceStorageCap;
+    const scaledYield = {
+      iron: yld.iron * resourcesMult,
+      fuel: yld.fuel * resourcesMult,
+      crystal: yld.crystal * resourcesMult,
+      rareEarth: yld.rareEarth * resourcesMult,
+    };
     const newMineCount = plot.mineCount + 1;
     const newEfficiency =
       newMineCount % 2 === 0
@@ -515,10 +536,13 @@ export const useGameStore = create<GameState>((set, get) => ({
     set((s) => ({
       player: {
         ...s.player,
-        iron: s.player.iron + yld.iron,
-        fuel: s.player.fuel + yld.fuel,
-        crystal: s.player.crystal + yld.crystal,
-        rareEarth: s.player.rareEarth + yld.rareEarth,
+        iron: Math.min(storageCap, s.player.iron + scaledYield.iron),
+        fuel: Math.min(storageCap, s.player.fuel + scaledYield.fuel),
+        crystal: Math.min(storageCap, s.player.crystal + scaledYield.crystal),
+        rareEarth: Math.min(
+          storageCap,
+          s.player.rareEarth + scaledYield.rareEarth,
+        ),
       },
       plots: s.plots.map((p) =>
         p.id === id
@@ -526,7 +550,7 @@ export const useGameStore = create<GameState>((set, get) => ({
           : p,
       ),
     }));
-    return yld;
+    return scaledYield;
   },
 
   activateRegenBoost: (id) => {
@@ -618,13 +642,17 @@ export const useGameStore = create<GameState>((set, get) => ({
     const defCmd = defInstanceId ? getCommander(defInstanceId) : null;
     const atkBonus = atkCmd ? atkCmd.atk : 0;
     const defBonus = defCmd ? defCmd.def : 0;
-    const atkPower = 10 + state.player.commanderAtk + atkBonus;
-    const defPower =
+    const baseAtk = 10 + state.player.commanderAtk + atkBonus;
+    const armoryMult = from.specialization === "ARMORY" ? 1.05 : 1.0;
+    const atkPower = baseAtk * armoryMult;
+    const baseDef =
       to.defenses.turrets * 3 +
       to.defenses.shields * 5 +
       to.defenses.walls * 2 +
       5 +
       defBonus;
+    const energyMult = to.specialization === "ENERGY_TECH" ? 1.1 : 1.0;
+    const defPower = baseDef * energyMult;
     const success = atkPower * 10 > defPower * 7;
     const entry: CombatEntry = {
       id: Date.now(),
@@ -649,7 +677,13 @@ export const useGameStore = create<GameState>((set, get) => ({
           )
         : s.plots,
       player: success
-        ? { ...s.player, plotsOwned: [...s.player.plotsOwned, toId] }
+        ? {
+            ...s.player,
+            plotsOwned: [...s.player.plotsOwned, toId],
+            frntBalance:
+              s.player.frntBalance +
+              (from.specialization === "TRADING_DEPOT" ? 11 : 10),
+          }
         : s.player,
       rankStats: {
         ...s.rankStats,
@@ -745,6 +779,39 @@ export const useGameStore = create<GameState>((set, get) => ({
     get().purchaseArchetype(commanderId as MilitaryBranch),
   upgradeCommander: (commanderId, _frntrCost) =>
     get().promoteCommander(commanderId),
+  setPlotSpecialization: (plotId, spec) =>
+    set((s) => ({
+      plots: s.plots.map((p) =>
+        p.id === plotId ? { ...p, specialization: spec } : p,
+      ),
+    })),
+
+  upgradeStorage: (plotId) => {
+    const state = get();
+    if (!state.player.plotsOwned.includes(plotId)) return;
+    if (state.player.frntBalance < 150) return;
+    if (state.player.resourceStorageCap >= 500) return;
+    set((s) => ({
+      player: {
+        ...s.player,
+        frntBalance: s.player.frntBalance - 150,
+        resourceStorageCap: Math.min(500, s.player.resourceStorageCap + 50),
+      },
+    }));
+  },
+
+  getNetworkBonus: () => {
+    const state = get();
+    const ownedSpecs = new Set(
+      state.plots
+        .filter(
+          (p) => state.player.plotsOwned.includes(p.id) && p.specialization,
+        )
+        .map((p) => p.specialization),
+    );
+    return ownedSpecs.size >= 4;
+  },
+
   setAuth: (principal) =>
     set((state) => ({ player: { ...state.player, principal } })),
 }));

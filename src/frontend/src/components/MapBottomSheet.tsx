@@ -19,7 +19,11 @@ import { MISSILE_CONFIGS } from "../constants/missiles";
 import { useArsenalAudio } from "../hooks/useArsenalAudio";
 import { useLaunchMissile } from "../hooks/useLaunchMissile";
 import { usePurchasePlot } from "../hooks/usePurchasePlot";
-import { type SubParcel, useGameStore } from "../store/gameStore";
+import {
+  type PlotSpecialization,
+  type SubParcel,
+  useGameStore,
+} from "../store/gameStore";
 import BuildingPicker from "./BuildingPicker";
 
 const CYAN = "#00ffcc";
@@ -64,6 +68,32 @@ const COMMANDER_IMAGES: Record<string, string> = {
     "/assets/generated/commander-phantom-ops-transparent.dim_300x300.png",
   "VOID HUNTER":
     "/assets/generated/commander-void-hunter-transparent.dim_300x300.png",
+};
+
+const SPEC_CONFIG: Record<
+  PlotSpecialization,
+  { color: string; label: string; buff: string }
+> = {
+  TRADING_DEPOT: {
+    color: "#f59e0b",
+    label: "TRADING DEPOT",
+    buff: "+10% FRNTR from combat wins",
+  },
+  ENERGY_TECH: {
+    color: "#3b82f6",
+    label: "ENERGY & TECH",
+    buff: "Dome Shield -10% damage taken",
+  },
+  ARMORY: {
+    color: "#ef4444",
+    label: "ARMORY",
+    buff: "+5% hit target accuracy",
+  },
+  RESOURCES: {
+    color: "#22c55e",
+    label: "RESOURCES",
+    buff: "+15% mineral yield",
+  },
 };
 
 function getCountdown(purchaseTime: number): string {
@@ -766,6 +796,8 @@ export default function MapBottomSheet({
   const setPlotHoverCard = useGameStore((s) => s.setPlotHoverCard);
   const commanderAssignments = useGameStore((s) => s.commanderAssignments);
 
+  const setPlotSpecialization = useGameStore((s) => s.setPlotSpecialization);
+  const getNetworkBonus = useGameStore((s) => s.getNetworkBonus);
   const mineResources = useGameStore((s) => s.mineResources);
   const activateRegenBoost = useGameStore((s) => s.activateRegenBoost);
 
@@ -1014,6 +1046,130 @@ export default function MapBottomSheet({
                 style={{ height: 1, background: BORDER, marginBottom: 12 }}
               />
 
+              {/* SPECIALIZATION SELECTOR */}
+              {isOwnPlot && (
+                <div style={{ marginBottom: 14 }}>
+                  {getNetworkBonus() && (
+                    <div
+                      data-ocid="map.network_linked.success_state"
+                      style={{
+                        marginBottom: 8,
+                        padding: "4px 8px",
+                        background: "rgba(0,255,204,0.08)",
+                        border: "1px solid rgba(0,255,204,0.4)",
+                        borderRadius: 4,
+                        fontSize: 8,
+                        color: CYAN,
+                        fontFamily: "monospace",
+                        letterSpacing: 2,
+                        fontWeight: 700,
+                        textAlign: "center",
+                        boxShadow: "0 0 12px rgba(0,255,204,0.15)",
+                        animation: "mapGlobePulse 2s ease-in-out infinite",
+                      }}
+                    >
+                      ⬡ NETWORK LINKED — ALL 4 SPECIALIZATIONS ACTIVE
+                    </div>
+                  )}
+                  {plot.specialization ? (
+                    <div
+                      style={{ display: "flex", alignItems: "center", gap: 6 }}
+                    >
+                      <span
+                        data-ocid="map.specialization.toggle"
+                        style={{
+                          fontSize: 9,
+                          padding: "3px 10px",
+                          borderRadius: 4,
+                          background: `${SPEC_CONFIG[plot.specialization].color}22`,
+                          border: `1px solid ${SPEC_CONFIG[plot.specialization].color}`,
+                          color: SPEC_CONFIG[plot.specialization].color,
+                          fontFamily: "monospace",
+                          letterSpacing: 1.5,
+                          fontWeight: 700,
+                        }}
+                      >
+                        {SPEC_CONFIG[plot.specialization].label}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: 8,
+                          color: "rgba(224,244,255,0.4)",
+                          fontFamily: "monospace",
+                        }}
+                      >
+                        {SPEC_CONFIG[plot.specialization].buff}
+                      </span>
+                    </div>
+                  ) : (
+                    <div>
+                      <div
+                        style={{
+                          fontSize: 8,
+                          color: CYAN_DIM,
+                          letterSpacing: 2,
+                          fontFamily: "monospace",
+                          marginBottom: 6,
+                        }}
+                      >
+                        CHOOSE PLOT SPECIALIZATION
+                      </div>
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "1fr 1fr",
+                          gap: 5,
+                        }}
+                      >
+                        {(
+                          Object.entries(SPEC_CONFIG) as [
+                            PlotSpecialization,
+                            { color: string; label: string; buff: string },
+                          ][]
+                        ).map(([key, cfg]) => (
+                          <button
+                            key={key}
+                            type="button"
+                            data-ocid={`map.specialization.${key.toLowerCase()}.button`}
+                            onClick={() => setPlotSpecialization(plot.id, key)}
+                            style={{
+                              padding: "8px 6px",
+                              background: `${cfg.color}11`,
+                              border: `1px solid ${cfg.color}66`,
+                              borderRadius: 6,
+                              cursor: "pointer",
+                              textAlign: "left",
+                            }}
+                          >
+                            <div
+                              style={{
+                                fontSize: 8,
+                                fontWeight: 700,
+                                color: cfg.color,
+                                letterSpacing: 1,
+                                fontFamily: "monospace",
+                                marginBottom: 2,
+                              }}
+                            >
+                              {cfg.label}
+                            </div>
+                            <div
+                              style={{
+                                fontSize: 7,
+                                color: `${cfg.color}aa`,
+                                fontFamily: "monospace",
+                              }}
+                            >
+                              {cfg.buff}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* SUB-PARCELS */}
               <div
                 style={{
@@ -1163,6 +1319,7 @@ export default function MapBottomSheet({
           plotId={selectedPlotId}
           subId={pickerSlot}
           onClose={() => setPickerSlot(null)}
+          specialization={plot?.specialization}
         />
       )}
     </>
