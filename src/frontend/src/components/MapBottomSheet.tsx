@@ -12,7 +12,8 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type React from "react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { getMineralYield, projectedMonthlyYield } from "../constants/minerals";
 import type { MissileConfig } from "../constants/missiles";
 import { MISSILE_CONFIGS } from "../constants/missiles";
 import { useArsenalAudio } from "../hooks/useArsenalAudio";
@@ -425,6 +426,323 @@ interface MapBottomSheetProps {
   onFireMissile?: (missile: MissileConfig) => void;
 }
 
+interface SurveyReportProps {
+  plot: import("../store/gameStore").PlotData;
+  isOwnPlot: boolean;
+  playerFrntr: number;
+  mineYield: {
+    iron: number;
+    fuel: number;
+    crystal: number;
+    rareEarth: number;
+  } | null;
+  regenError: string | null;
+  onMine: () => void;
+  onRegen: () => void;
+}
+
+function SurveyReport({
+  plot,
+  isOwnPlot,
+  playerFrntr,
+  mineYield,
+  regenError,
+  onMine,
+  onRegen,
+}: SurveyReportProps) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 10000);
+    return () => clearInterval(t);
+  }, []);
+
+  const regenActive = now < plot.regenActiveUntil;
+  const regenRemaining = plot.regenActiveUntil - now;
+  const regenHours = Math.floor(regenRemaining / 3600000);
+  const regenMins = Math.floor((regenRemaining % 3600000) / 60000);
+
+  const monthly = projectedMonthlyYield(plot.biome, plot.efficiency);
+  const effPct = plot.efficiency;
+  const effColor =
+    effPct > 80 ? "#22c55e" : effPct >= 60 ? "#f59e0b" : "#ef4444";
+
+  const previewYield = getMineralYield(
+    plot.biome,
+    plot.efficiency,
+    regenActive,
+  );
+
+  return (
+    <div style={{ marginBottom: 14 }}>
+      {/* Section header */}
+      <div
+        style={{
+          fontSize: 9,
+          color: CYAN_DIM,
+          letterSpacing: 2,
+          fontFamily: "monospace",
+          marginBottom: 8,
+        }}
+      >
+        SURVEY REPORT
+      </div>
+
+      {/* Efficiency bar */}
+      <div style={{ marginBottom: 10 }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            marginBottom: 4,
+            alignItems: "center",
+          }}
+        >
+          <span
+            style={{
+              fontSize: 8,
+              color: "rgba(224,244,255,0.5)",
+              letterSpacing: 1,
+              fontFamily: "monospace",
+            }}
+          >
+            EFFICIENCY
+          </span>
+          <span
+            style={{
+              fontSize: 9,
+              fontWeight: 700,
+              color: effColor,
+              fontFamily: "monospace",
+              textShadow: `0 0 6px ${effColor}88`,
+            }}
+          >
+            {effPct}%
+          </span>
+        </div>
+        <div
+          style={{
+            height: 4,
+            background: "rgba(255,255,255,0.07)",
+            borderRadius: 2,
+            border: "1px solid rgba(255,255,255,0.1)",
+            overflow: "hidden",
+          }}
+        >
+          <div
+            style={{
+              height: "100%",
+              width: `${effPct}%`,
+              background: `linear-gradient(90deg, ${effColor}, ${effColor}aa)`,
+              borderRadius: 2,
+              transition: "width 0.4s ease",
+            }}
+          />
+        </div>
+        <div
+          style={{
+            marginTop: 3,
+            fontSize: 7,
+            color: "rgba(224,244,255,0.3)",
+            fontFamily: "monospace",
+            letterSpacing: 0.5,
+          }}
+        >
+          Extracted: {plot.mineCount}x · Degrades 1% per 2 mines
+        </div>
+      </div>
+
+      {/* Regen status */}
+      {regenActive && (
+        <div
+          data-ocid="map.success_state"
+          style={{
+            marginBottom: 8,
+            fontSize: 8,
+            color: CYAN,
+            fontFamily: "monospace",
+            letterSpacing: 1,
+            padding: "3px 6px",
+            background: "rgba(0,255,204,0.07)",
+            border: "1px solid rgba(0,255,204,0.2)",
+            borderRadius: 3,
+          }}
+        >
+          ⚡ REGEN ACTIVE: {regenHours}h {regenMins}m remaining
+        </div>
+      )}
+
+      {/* Monthly projection */}
+      <div
+        style={{
+          marginBottom: 10,
+          padding: "7px 8px",
+          background: "rgba(0,0,0,0.25)",
+          border: "1px solid rgba(0,255,204,0.12)",
+          borderRadius: 4,
+        }}
+      >
+        <div
+          style={{
+            fontSize: 7,
+            color: CYAN_DIM,
+            letterSpacing: 2,
+            fontFamily: "monospace",
+            marginBottom: 5,
+          }}
+        >
+          PROJECTED MONTHLY YIELD
+        </div>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: "3px 10px",
+          }}
+        >
+          {[
+            { label: "IRON", val: monthly.iron, color: "#94a3b8" },
+            { label: "FUEL", val: monthly.fuel, color: "#f97316" },
+            { label: "CRYSTAL", val: monthly.crystal, color: "#3b82f6" },
+            { label: "RARE EARTH", val: monthly.rareEarth, color: "#c084fc" },
+          ].map(({ label, val, color }) => (
+            <div
+              key={label}
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+              }}
+            >
+              <span
+                style={{
+                  fontSize: 7,
+                  color: "rgba(224,244,255,0.45)",
+                  letterSpacing: 0.5,
+                  fontFamily: "monospace",
+                }}
+              >
+                {label}
+              </span>
+              <span
+                style={{
+                  fontSize: 8,
+                  fontWeight: 700,
+                  color,
+                  fontFamily: "monospace",
+                }}
+              >
+                {val >= 1000 ? `${(val / 1000).toFixed(1)}K` : val}
+              </span>
+            </div>
+          ))}
+        </div>
+        <div
+          style={{
+            marginTop: 4,
+            fontSize: 7,
+            color: "rgba(224,244,255,0.25)",
+            fontFamily: "monospace",
+          }}
+        >
+          Based on 10 mines/day · Biome: {plot.biome}
+        </div>
+      </div>
+
+      {/* Per-mine preview */}
+      <div
+        style={{
+          marginBottom: isOwnPlot ? 10 : 0,
+          fontSize: 7,
+          color: "rgba(224,244,255,0.35)",
+          fontFamily: "monospace",
+          letterSpacing: 0.5,
+        }}
+      >
+        Per mine:{" "}
+        <span style={{ color: "#94a3b8" }}>+{previewYield.iron} Fe</span>{" "}
+        <span style={{ color: "#f97316" }}>+{previewYield.fuel} Fuel</span>{" "}
+        <span style={{ color: "#3b82f6" }}>+{previewYield.crystal} Xtal</span>{" "}
+        <span style={{ color: "#c084fc" }}>+{previewYield.rareEarth} Rare</span>
+      </div>
+
+      {/* Mine yield popup */}
+      {mineYield && (
+        <div
+          data-ocid="map.success_state"
+          style={{
+            marginBottom: 8,
+            padding: "5px 8px",
+            background: "rgba(34,197,94,0.12)",
+            border: "1px solid rgba(34,197,94,0.3)",
+            borderRadius: 4,
+            fontSize: 9,
+            color: "#22c55e",
+            fontFamily: "monospace",
+            letterSpacing: 0.5,
+            fontWeight: 700,
+          }}
+        >
+          +{mineYield.iron} IRON +{mineYield.fuel} FUEL +{mineYield.crystal}{" "}
+          XTAL +{mineYield.rareEarth} RARE
+        </div>
+      )}
+
+      {/* Mine + Regen buttons (own plots only) */}
+      {isOwnPlot && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <button
+            type="button"
+            data-ocid="map.primary_button"
+            onClick={onMine}
+            style={{
+              ...actionBtnStyle("#00ffcc", "rgba(0,255,204,0.1)"),
+              fontSize: 10,
+            }}
+          >
+            ⛏ MINE RESOURCES
+          </button>
+          <button
+            type="button"
+            data-ocid="map.secondary_button"
+            onClick={onRegen}
+            disabled={regenActive || playerFrntr < 50}
+            style={{
+              ...actionBtnStyle(
+                regenActive
+                  ? "rgba(0,255,204,0.3)"
+                  : playerFrntr < 50
+                    ? "rgba(245,158,11,0.3)"
+                    : "#f59e0b",
+                regenActive ? "rgba(0,0,0,0.2)" : "rgba(245,158,11,0.08)",
+              ),
+              opacity: regenActive || playerFrntr < 50 ? 0.55 : 1,
+              cursor:
+                regenActive || playerFrntr < 50 ? "not-allowed" : "pointer",
+              fontSize: 10,
+            }}
+          >
+            ⚡ REGEN BOOST — 50 FRNTR
+          </button>
+          {regenError && (
+            <div
+              data-ocid="map.error_state"
+              style={{
+                fontSize: 9,
+                color: "#ef4444",
+                textAlign: "center",
+                letterSpacing: 1,
+                fontFamily: "monospace",
+              }}
+            >
+              {regenError}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function MapBottomSheet({
   onClose,
   controlsRef,
@@ -432,6 +750,13 @@ export default function MapBottomSheet({
 }: MapBottomSheetProps) {
   const [pickerSlot, setPickerSlot] = useState<number | null>(null);
   const [purchaseError, setPurchaseError] = useState<string | null>(null);
+  const [mineYield, setMineYield] = useState<{
+    iron: number;
+    fuel: number;
+    crystal: number;
+    rareEarth: number;
+  } | null>(null);
+  const [regenError, setRegenError] = useState<string | null>(null);
 
   const selectedPlotId = useGameStore((s) => s.selectedPlotId);
   const plots = useGameStore((s) => s.plots);
@@ -440,6 +765,9 @@ export default function MapBottomSheet({
   const setTargetPlotId = useGameStore((s) => s.setTargetPlotId);
   const setPlotHoverCard = useGameStore((s) => s.setPlotHoverCard);
   const commanderAssignments = useGameStore((s) => s.commanderAssignments);
+
+  const mineResources = useGameStore((s) => s.mineResources);
+  const activateRegenBoost = useGameStore((s) => s.activateRegenBoost);
 
   const { purchasePlot, isPurchasing } = usePurchasePlot();
 
@@ -714,6 +1042,35 @@ export default function MapBottomSheet({
                   />
                 ))}
               </div>
+
+              {/* DIVIDER */}
+              <div
+                style={{ height: 1, background: BORDER, marginBottom: 12 }}
+              />
+
+              {/* SURVEY REPORT */}
+              <SurveyReport
+                plot={plot}
+                isOwnPlot={isOwnPlot}
+                playerFrntr={player.frntBalance}
+                mineYield={mineYield}
+                regenError={regenError}
+                onMine={() => {
+                  const yld = mineResources(plot.id);
+                  if (yld) {
+                    setMineYield(yld);
+                    setTimeout(() => setMineYield(null), 3000);
+                  }
+                }}
+                onRegen={() => {
+                  setRegenError(null);
+                  if (player.frntBalance < 50) {
+                    setRegenError("INSUFFICIENT FRNTR");
+                    return;
+                  }
+                  activateRegenBoost(plot.id);
+                }}
+              />
             </>
           )}
         </div>

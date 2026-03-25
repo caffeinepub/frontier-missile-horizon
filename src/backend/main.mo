@@ -9,9 +9,9 @@ import Array "mo:core/Array";
 import Order "mo:core/Order";
 import Time "mo:core/Time";
 import Float "mo:core/Float";
-import Migration "migration";
 
-(with migration = Migration.run)
+
+
 actor {
   type Defenses = {
     turrets : Nat;

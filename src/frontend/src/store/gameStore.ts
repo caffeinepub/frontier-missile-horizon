@@ -7,6 +7,7 @@ import {
   getCommander,
 } from "../constants/commanders";
 import { INTERCEPTOR_CONFIGS } from "../constants/interceptors";
+import { getMineralYield } from "../constants/minerals";
 import { MISSILE_CONFIGS } from "../constants/missiles";
 import { GEODESIC_TILES } from "../utils/geodesicGrid";
 
@@ -66,11 +67,14 @@ export interface PlotData {
   lat: number;
   lng: number;
   biome: Biome;
-  richness: number;
+  efficiency: number; // 78-98, randomized per plot; depletes with mining
+  mineCount: number; // total times mined
+  regenActiveUntil: number; // timestamp ms, 0 = inactive
   owner: string | null;
   iron: number;
   fuel: number;
   crystal: number;
+  rareEarth: number; // accumulated rare earth
   defenses: { turrets: number; shields: number; walls: number };
 }
 
@@ -79,6 +83,7 @@ export interface PlayerData {
   iron: number;
   fuel: number;
   crystal: number;
+  rareEarth: number;
   frntBalance: number;
   plotsOwned: number[];
   commanderType: string | null;
@@ -208,7 +213,9 @@ function generatePlots(): PlotData[] {
     lat: tile.lat,
     lng: tile.lng,
     biome: randomBiome(i),
-    richness: 1 + (i % 5),
+    efficiency: Math.floor(78 + (((i * 2654435761) >>> 0) % 21)),
+    mineCount: 0,
+    regenActiveUntil: 0,
     owner:
       i % 853 === 0
         ? "NEXUS-7"
@@ -222,6 +229,7 @@ function generatePlots(): PlotData[] {
     iron: 0,
     fuel: 0,
     crystal: 0,
+    rareEarth: 0,
     defenses: { turrets: 0, shields: 0, walls: 0 },
   }));
 }
@@ -316,6 +324,13 @@ interface GameState {
   setSelectedWorldPoint: (p: [number, number, number] | null) => void;
   purchasePlot: (id: number) => void;
   claimResources: (id: number) => void;
+  mineResources: (id: number) => {
+    iron: number;
+    fuel: number;
+    crystal: number;
+    rareEarth: number;
+  } | null;
+  activateRegenBoost: (id: number) => void;
   claimAllFrntr: (amount: number) => void;
   mintTestTokens: () => void;
   attack: (fromId: number, toId: number) => void;
@@ -353,6 +368,7 @@ export const useGameStore = create<GameState>((set, get) => ({
     iron: 0,
     fuel: 0,
     crystal: 0,
+    rareEarth: 0,
     frntBalance: 0,
     plotsOwned: [],
     commanderType: null,
@@ -481,18 +497,55 @@ export const useGameStore = create<GameState>((set, get) => ({
   },
 
   claimResources: (id) => {
+    get().mineResources(id);
+  },
+
+  mineResources: (id) => {
     const state = get();
+    if (!state.player.plotsOwned.includes(id)) return null;
     const plot = state.plots.find((p) => p.id === id);
-    if (!plot) return;
+    if (!plot) return null;
+    const regenActive = Date.now() < plot.regenActiveUntil;
+    const yld = getMineralYield(plot.biome, plot.efficiency, regenActive);
+    const newMineCount = plot.mineCount + 1;
+    const newEfficiency =
+      newMineCount % 2 === 0
+        ? Math.max(0, plot.efficiency - 1)
+        : plot.efficiency;
     set((s) => ({
       player: {
         ...s.player,
-        iron: s.player.iron + plot.iron,
-        fuel: s.player.fuel + plot.fuel,
-        crystal: s.player.crystal + plot.crystal,
+        iron: s.player.iron + yld.iron,
+        fuel: s.player.fuel + yld.fuel,
+        crystal: s.player.crystal + yld.crystal,
+        rareEarth: s.player.rareEarth + yld.rareEarth,
       },
       plots: s.plots.map((p) =>
-        p.id === id ? { ...p, iron: 0, fuel: 0, crystal: 0 } : p,
+        p.id === id
+          ? { ...p, mineCount: newMineCount, efficiency: newEfficiency }
+          : p,
+      ),
+    }));
+    return yld;
+  },
+
+  activateRegenBoost: (id) => {
+    const state = get();
+    if (!state.player.plotsOwned.includes(id)) return;
+    const cost = 50;
+    if (state.player.frntBalance < cost) return;
+    const plot = state.plots.find((p) => p.id === id);
+    if (!plot) return;
+    set((s) => ({
+      player: { ...s.player, frntBalance: s.player.frntBalance - cost },
+      plots: s.plots.map((p) =>
+        p.id === id
+          ? {
+              ...p,
+              regenActiveUntil: Date.now() + 4 * 60 * 60 * 1000,
+              efficiency: Math.min(98, p.efficiency + 20),
+            }
+          : p,
       ),
     }));
   },
