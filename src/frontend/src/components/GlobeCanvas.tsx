@@ -5,7 +5,11 @@ import { Suspense, useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import type { MissileConfig } from "../constants/missiles";
 import { useGameStore } from "../store/gameStore";
-import { PLOT_POSITION_CACHE, findNearestTile } from "../utils/geodesicGrid";
+import {
+  GEODESIC_TILES,
+  PLOT_POSITION_CACHE,
+  findNearestTile,
+} from "../utils/geodesicGrid";
 
 function latLngToXYZ(lat: number, lng: number, r: number): THREE.Vector3 {
   const phi = (90 - lat) * (Math.PI / 180);
@@ -20,7 +24,7 @@ function latLngToXYZ(lat: number, lng: number, r: number): THREE.Vector3 {
 // ---------------------------------------------------------------------------
 // Hex tile geometry — flat hexagon in XZ plane, Y = outward normal
 // ---------------------------------------------------------------------------
-const HEX_R = 0.0195;
+const HEX_R = 0.021;
 function makeHexGeometry(): THREE.BufferGeometry {
   const positions = new Float32Array(6 * 3 * 3);
   let idx = 0;
@@ -83,10 +87,10 @@ const _pos = new THREE.Vector3();
 const _Y = new THREE.Vector3(0, 1, 0);
 
 // State colours
-const COL_BASE = new THREE.Color(0x00ccaa);
-const COL_OWNED = new THREE.Color(0x22c55e);
-const COL_HOVER = new THREE.Color(0xffd700);
-const COL_SELECTED = new THREE.Color(0x00ffff);
+const COL_BASE = new THREE.Color(0.05, 0.07, 0.07);
+const COL_OWNED = new THREE.Color(0.45, 1.0, 0.8);
+const COL_HOVER = new THREE.Color(1.0, 1.0, 1.0);
+const COL_SELECTED = new THREE.Color(1.0, 1.0, 1.0);
 const COL_FACTION: Record<string, THREE.Color> = {
   "NEXUS-7": new THREE.Color(0xef4444),
   KRONOS: new THREE.Color(0x8b5cf6),
@@ -106,20 +110,15 @@ function GlobeHexGrid() {
   const { camera } = useThree();
   const count = plots.length;
 
-  // One-time matrix setup
-  // biome-ignore lint/correctness/useExhaustiveDependencies: runs once; plots/count are stable store refs
+  // One-time matrix setup — use GEODESIC_TILES directly (no lat/lng conversion)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs once; tiles are static
   useEffect(() => {
     const mesh = meshRef.current;
     if (!mesh) return;
     for (let i = 0; i < count; i++) {
-      const p = plots[i];
-      const phi = (90 - p.lat) * (Math.PI / 180);
-      const theta = (p.lng + 180) * (Math.PI / 180);
-      _pos.set(
-        -Math.sin(phi) * Math.cos(theta),
-        Math.cos(phi),
-        Math.sin(phi) * Math.sin(theta),
-      );
+      const tile = GEODESIC_TILES[i];
+      if (!tile) continue;
+      _pos.set(tile.nx, tile.ny, tile.nz);
       _quat.setFromUnitVectors(_Y, _pos);
       _mat4.makeRotationFromQuaternion(_quat);
       _mat4.setPosition(_pos.clone().multiplyScalar(1.001));
@@ -157,9 +156,9 @@ function GlobeHexGrid() {
     const dist = camera.position.length();
     const mat = mesh.material as THREE.MeshBasicMaterial;
     mat.opacity = THREE.MathUtils.clamp(
-      THREE.MathUtils.mapLinear(dist, 1.4, 2.5, 0.28, 0.07),
-      0.05,
-      0.3,
+      THREE.MathUtils.mapLinear(dist, 1.4, 2.5, 0.35, 0.06),
+      0.04,
+      0.38,
     );
   });
 
@@ -172,7 +171,7 @@ function GlobeHexGrid() {
       <meshBasicMaterial
         vertexColors
         transparent
-        opacity={0.18}
+        opacity={0.35}
         depthWrite={false}
         side={THREE.DoubleSide}
       />
@@ -191,27 +190,20 @@ const _selQ = new THREE.Quaternion();
 function SelectedTileHighlight() {
   const selectedId = useGameStore((s) => s.selectedPlotId);
   const hoveredId = useGameStore((s) => s.hoveredPlotId);
-  const plots = useGameStore((s) => s.plots);
 
   const selMeshRef = useRef<THREE.Mesh>(null);
   const hoverMeshRef = useRef<THREE.Mesh>(null);
 
   function positionAt(mesh: THREE.Mesh, plotId: number) {
-    const p = plots[plotId];
-    if (!p) {
+    const tile = GEODESIC_TILES[plotId];
+    if (!tile) {
       mesh.visible = false;
       return;
     }
-    const phi = (90 - p.lat) * (Math.PI / 180);
-    const theta = (p.lng + 180) * (Math.PI / 180);
-    _selPos.set(
-      -Math.sin(phi) * Math.cos(theta),
-      Math.cos(phi),
-      Math.sin(phi) * Math.sin(theta),
-    );
+    _selPos.set(tile.nx, tile.ny, tile.nz);
     _selQ.setFromUnitVectors(_selY, _selPos);
     mesh.quaternion.copy(_selQ);
-    mesh.position.copy(_selPos).multiplyScalar(1.003); // slightly above tiles
+    mesh.position.copy(_selPos).multiplyScalar(1.003);
     mesh.visible = true;
   }
 
@@ -245,7 +237,7 @@ function SelectedTileHighlight() {
       {/* Selection ring — pulsing bright cyan */}
       <mesh ref={selMeshRef} visible={false} geometry={HEX_RING_GEO}>
         <meshBasicMaterial
-          color={0x00ffff}
+          color={0xffffff}
           transparent
           opacity={0.9}
           depthWrite={false}
@@ -255,9 +247,9 @@ function SelectedTileHighlight() {
       {/* Hover ring — gold, no pulse */}
       <mesh ref={hoverMeshRef} visible={false} geometry={HEX_RING_GEO}>
         <meshBasicMaterial
-          color={0xffd700}
+          color={0xcccccc}
           transparent
-          opacity={0.6}
+          opacity={0.5}
           depthWrite={false}
           side={THREE.DoubleSide}
         />
@@ -291,13 +283,42 @@ const atmosphereFrag = /* glsl */ `
 `;
 
 // ---------------------------------------------------------------------------
+// Day/Night Earth shaders — world-space normals so sun stays fixed
+// ---------------------------------------------------------------------------
+const earthDayNightVert = /* glsl */ `
+  varying vec3 vWorldNormal;
+  varying vec2 vUv;
+  void main() {
+    vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const earthDayNightFrag = /* glsl */ `
+  uniform sampler2D dayMap;
+  uniform sampler2D nightMap;
+  uniform vec3 sunDir;
+  varying vec3 vWorldNormal;
+  varying vec2 vUv;
+  void main() {
+    float lit = dot(normalize(vWorldNormal), normalize(sunDir));
+    float t = smoothstep(-0.2, 0.3, lit);
+    vec4 day = texture2D(dayMap, vUv);
+    vec4 night = texture2D(nightMap, vUv) * 2.5;
+    gl_FragColor = mix(night, day, t);
+  }
+`;
+
+// ---------------------------------------------------------------------------
 // EarthSphere — globe mesh + hex grid + click handling
 // ---------------------------------------------------------------------------
 function EarthSphere() {
-  const dayTex = useTexture("/assets/generated/earth-day.dim_4096x2048.jpg");
-  const cloudsTex = useTexture(
+  const [dayTex, cloudsTex, nightTex] = useTexture([
+    "/assets/generated/earth-day.dim_4096x2048.jpg",
     "/assets/generated/earth-clouds.dim_2048x1024.jpg",
-  );
+    "/assets/generated/earth-night-lights.dim_2048x1024.jpg",
+  ]);
   const globeRef = useRef<THREE.Group>(null);
   const cloudsRef = useRef<THREE.Mesh>(null);
 
@@ -309,6 +330,15 @@ function EarthSphere() {
   const atmosphereUniforms = useMemo(
     () => ({ glowColor: { value: new THREE.Color(0.1, 0.5, 1.0) } }),
     [],
+  );
+
+  const earthUniforms = useMemo(
+    () => ({
+      dayMap: { value: dayTex },
+      nightMap: { value: nightTex },
+      sunDir: { value: new THREE.Vector3(5, 3, 5).normalize() },
+    }),
+    [dayTex, nightTex],
   );
 
   useFrame(() => {
@@ -362,10 +392,10 @@ function EarthSphere() {
         onPointerLeave={handlePointerLeave}
       >
         <sphereGeometry args={[1, 64, 64]} />
-        <meshPhongMaterial
-          map={dayTex}
-          shininess={15}
-          specular={new THREE.Color(0x333333)}
+        <shaderMaterial
+          vertexShader={earthDayNightVert}
+          fragmentShader={earthDayNightFrag}
+          uniforms={earthUniforms}
         />
       </mesh>
 
@@ -530,9 +560,9 @@ function MissileAnimation({ active, onComplete, missileConfig }: MissileProps) {
           .clone()
           .add(
             new THREE.Vector3(
-              Math.cos(angle) * 0.05,
+              Math.cos(angle) * 0.04,
               Math.sin(angle) * 0.02,
-              Math.sin(angle) * 0.05,
+              Math.sin(angle) * 0.04,
             ),
           )
           .normalize(),
@@ -1225,13 +1255,8 @@ function GlobeScene({
 }: SceneProps) {
   return (
     <>
-      <ambientLight color={0x223344} intensity={0.8} />
-      <directionalLight color={0xffffff} intensity={1.5} position={[5, 3, 5]} />
-      <directionalLight
-        color={0x1144aa}
-        intensity={0.3}
-        position={[-3, -1, -2]}
-      />
+      <ambientLight color={0x334455} intensity={0.4} />
+      <directionalLight color={0xffffff} intensity={1.8} position={[5, 3, 5]} />
       <Suspense fallback={null}>
         <Starfield />
         <EarthSphere />

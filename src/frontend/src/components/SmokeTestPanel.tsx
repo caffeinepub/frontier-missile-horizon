@@ -145,24 +145,47 @@ export default function SmokeTestPanel() {
 
       // 2 PLAYER STATE FIELDS
       async () => {
-        const { player } = useGameStore.getState();
-        const required = [
-          "frntBalance",
-          "plotsOwned",
-          "iron",
-          "fuel",
-          "crystal",
-          "mockIcpBalance",
-          "weaponInventory",
-        ] as const;
-        const missing = required.filter((f) => !(f in player));
-        const pass = missing.length === 0;
-        return {
-          pass,
-          detail: pass
-            ? `All ${required.length} fields present`
-            : `Missing: ${missing.join(", ")}`,
-        };
+        try {
+          const state = useGameStore.getState();
+          if (!state) return { pass: false, detail: "Store returned null" };
+          const player = state.player;
+          if (!player || typeof player !== "object") {
+            return { pass: false, detail: `player is ${typeof player}` };
+          }
+          const required = [
+            "frntBalance",
+            "plotsOwned",
+            "iron",
+            "fuel",
+            "crystal",
+            "mockIcpBalance",
+            "weaponInventory",
+          ];
+          const present: string[] = [];
+          const missing: string[] = [];
+          for (const f of required) {
+            if (
+              Object.prototype.hasOwnProperty.call(player, f) ||
+              f in player
+            ) {
+              present.push(f);
+            } else {
+              missing.push(f);
+            }
+          }
+          const pass = missing.length === 0;
+          return {
+            pass,
+            detail: pass
+              ? `All ${required.length} fields present ✓`
+              : `Missing: [${missing.join(", ")}] — Found: [${present.join(", ")}]`,
+          };
+        } catch (err) {
+          return {
+            pass: false,
+            detail: `Exception: ${err instanceof Error ? err.message : String(err)}`,
+          };
+        }
       },
 
       // 3 BALANCES START AT ZERO
