@@ -201,15 +201,12 @@ function randomBiome(seed: number): Biome {
 }
 
 function generatePlots(): PlotData[] {
-  // Uses icosahedral geodesic subdivision (freq=32) → 10,242 near-equal-area tiles.
-  // Built once at module load in geodesicGrid.ts.
   return GEODESIC_TILES.map((tile, i) => ({
     id: i,
     lat: tile.lat,
     lng: tile.lng,
     biome: randomBiome(i),
     richness: 1 + (i % 5),
-    // Spread AI faction ownership proportionally across the globe
     owner:
       i % 853 === 0
         ? "NEXUS-7"
@@ -223,11 +220,7 @@ function generatePlots(): PlotData[] {
     iron: 0,
     fuel: 0,
     crystal: 0,
-    defenses: {
-      turrets: 0,
-      shields: 0,
-      walls: 0,
-    },
+    defenses: { turrets: 0, shields: 0, walls: 0 },
   }));
 }
 
@@ -288,6 +281,10 @@ interface GameState {
   plots: PlotData[];
   player: PlayerData;
   selectedPlotId: number | null;
+  /** World-space click point (normalized × 2.0) for camera animation.
+   *  Stored on every tile click so CameraAnimator sees the actual globe-rotated
+   *  position rather than recomputing from static lat/lng. */
+  selectedWorldPoint: [number, number, number] | null;
   targetPlotId: number | null;
   combatLog: CombatEntry[];
   leaderboard: LeaderEntry[];
@@ -296,18 +293,17 @@ interface GameState {
   activeWeapon: string | null;
   hoveredPlotId: number | null;
   plotHoverCard: PlotHoverCard | null;
-  commanderAssignments: Record<number, string>; // plotId -> instanceId
+  commanderAssignments: Record<number, string>;
   plotPurchaseTimes: Record<number, number>;
   rankStats: RankStats;
-  // Arsenal
   equippedMissileId: string | null;
   arsenalInventory: Record<string, number>;
-  // New archetype system
-  ownedCommanders: OwnedCommander[]; // replaces ownedCommanderIds
-  ownedCommanderIds: string[]; // legacy compat: instanceIds
-  commanderUpgrades: Record<string, number>; // legacy compat
+  ownedCommanders: OwnedCommander[];
+  ownedCommanderIds: string[];
+  commanderUpgrades: Record<string, number>;
 
   selectPlot: (id: number | null) => void;
+  setSelectedWorldPoint: (p: [number, number, number] | null) => void;
   purchasePlot: (id: number) => void;
   claimResources: (id: number) => void;
   claimAllFrntr: (amount: number) => void;
@@ -330,13 +326,10 @@ interface GameState {
   selectCommander: (id: string, atk: number, def: number) => void;
   assignCommanderToPlot: (plotId: number, instanceId: string) => void;
   removeCommanderFromPlot: (plotId: number) => void;
-  // Arsenal actions
   setEquippedMissile: (id: string) => void;
   fireArsenalMissile: (missileId: string) => void;
-  // New archetype actions
   purchaseArchetype: (archetypeId: MilitaryBranch) => boolean;
   promoteCommander: (instanceId: string) => boolean;
-  // Legacy compat
   purchaseCommander: (commanderId: string) => boolean;
   upgradeCommander: (commanderId: string, frntrCost: number) => boolean;
 }
@@ -365,6 +358,7 @@ export const useGameStore = create<GameState>((set, get) => ({
     mockIcpBalance: 5.0,
   },
   selectedPlotId: null,
+  selectedWorldPoint: null,
   targetPlotId: null,
   combatLog: generateCombatLog(),
   leaderboard: generateLeaderboard(),
@@ -387,13 +381,13 @@ export const useGameStore = create<GameState>((set, get) => ({
   commanderUpgrades: {},
 
   selectPlot: (id) => set({ selectedPlotId: id }),
+  setSelectedWorldPoint: (p) => set({ selectedWorldPoint: p }),
   setActiveWeapon: (weapon) => set({ activeWeapon: weapon }),
   setTargetPlotId: (id) => set({ targetPlotId: id }),
   setPlotHoverCard: (card) => set({ plotHoverCard: card }),
   setHoveredPlotId: (id) => set({ hoveredPlotId: id }),
   setFaction: (faction) =>
     set((state) => ({ player: { ...state.player, faction } })),
-
   setEquippedMissile: (id) => set({ equippedMissileId: id }),
 
   fireArsenalMissile: (missileId) =>
@@ -520,14 +514,12 @@ export const useGameStore = create<GameState>((set, get) => ({
     const from = state.plots.find((p) => p.id === fromId);
     const to = state.plots.find((p) => p.id === toId);
     if (!from || !to) return;
-
     const atkInstanceId = state.commanderAssignments[fromId];
     const defInstanceId = state.commanderAssignments[toId];
     const atkCmd = atkInstanceId ? getCommander(atkInstanceId) : null;
     const defCmd = defInstanceId ? getCommander(defInstanceId) : null;
     const atkBonus = atkCmd ? atkCmd.atk : 0;
     const defBonus = defCmd ? defCmd.def : 0;
-
     const atkPower = 10 + state.player.commanderAtk + atkBonus;
     const defPower =
       to.defenses.turrets * 3 +
@@ -536,7 +528,6 @@ export const useGameStore = create<GameState>((set, get) => ({
       5 +
       defBonus;
     const success = atkPower * 10 > defPower * 7;
-
     const entry: CombatEntry = {
       id: Date.now(),
       timestamp: Date.now(),
@@ -546,7 +537,6 @@ export const useGameStore = create<GameState>((set, get) => ({
       toPlot: toId,
       success,
     };
-
     set((s) => ({
       combatLog: [entry, ...s.combatLog.slice(0, 49)],
       plots: success
@@ -591,7 +581,6 @@ export const useGameStore = create<GameState>((set, get) => ({
       return { commanderAssignments: next };
     }),
 
-  // ── New archetype system ────────────────────────────────────────────────
   purchaseArchetype: (archetypeId) => {
     const state = get();
     const arch = getArchetype(archetypeId);
@@ -634,7 +623,6 @@ export const useGameStore = create<GameState>((set, get) => ({
       ...commander,
       currentRankIndex: nextRankIndex,
     };
-    // Update instanceId to reflect new rank (for assignment lookup)
     const newInstanceId = `${commander.archetypeId}:${nextRankIndex}:${instanceId.split(":")[2] ?? Date.now()}`;
     updatedCommander.instanceId = newInstanceId;
     const updatedAssignments = { ...state.commanderAssignments };
@@ -655,13 +643,10 @@ export const useGameStore = create<GameState>((set, get) => ({
     return true;
   },
 
-  // ── Legacy compat ───────────────────────────────────────────────────────
   purchaseCommander: (commanderId) =>
     get().purchaseArchetype(commanderId as MilitaryBranch),
-
   upgradeCommander: (commanderId, _frntrCost) =>
     get().promoteCommander(commanderId),
-
   setAuth: (principal) =>
     set((state) => ({ player: { ...state.player, principal } })),
 }));
