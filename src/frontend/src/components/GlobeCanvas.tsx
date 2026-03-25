@@ -33,6 +33,35 @@ function getHexCorners(center: THREE.Vector3, radius: number): THREE.Vector3[] {
   return corners;
 }
 
+function buildFilledHexGeometry(
+  plotId: number,
+  plots: ReturnType<typeof useGameStore.getState>["plots"],
+): THREE.BufferGeometry {
+  const HEX_RADIUS = 0.018;
+  const plot = plots[plotId];
+  const center = latLngToXYZ(plot.lat, plot.lng, 1.002);
+  const corners = getHexCorners(center, HEX_RADIUS);
+  // Triangle fan: 6 triangles
+  const positions = new Float32Array(6 * 3 * 3);
+  let idx = 0;
+  for (let i = 0; i < 6; i++) {
+    const a = corners[i];
+    const b = corners[(i + 1) % 6];
+    positions[idx++] = center.x;
+    positions[idx++] = center.y;
+    positions[idx++] = center.z;
+    positions[idx++] = a.x;
+    positions[idx++] = a.y;
+    positions[idx++] = a.z;
+    positions[idx++] = b.x;
+    positions[idx++] = b.y;
+    positions[idx++] = b.z;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  return geo;
+}
+
 const atmosphereVert = /* glsl */ `
   varying vec3 vNormal;
   varying vec3 vViewPosition;
@@ -102,6 +131,84 @@ function HexGrid() {
   );
 }
 
+function HexHighlights() {
+  const plots = useGameStore((s) => s.plots);
+  const hoveredPlotId = useGameStore((s) => s.hoveredPlotId);
+  const selectedPlotId = useGameStore((s) => s.selectedPlotId);
+  const ownedPlots = useGameStore((s) => s.player.plotsOwned);
+
+  const meshes = useMemo(() => {
+    const items: {
+      geo: THREE.BufferGeometry;
+      color: string;
+      opacity: number;
+      key: string;
+    }[] = [];
+    const rendered = new Set<number>();
+
+    // Owned plots — green
+    for (const pid of ownedPlots) {
+      if (pid >= 0 && pid < plots.length) {
+        rendered.add(pid);
+        items.push({
+          geo: buildFilledHexGeometry(pid, plots),
+          color: "#22c55e",
+          opacity: 0.25,
+          key: `owned-${pid}`,
+        });
+      }
+    }
+
+    // Selected plot — cyan (on top of owned if overlap)
+    if (
+      selectedPlotId !== null &&
+      selectedPlotId >= 0 &&
+      selectedPlotId < plots.length
+    ) {
+      items.push({
+        geo: buildFilledHexGeometry(selectedPlotId, plots),
+        color: "#00ffcc",
+        opacity: 0.35,
+        key: `selected-${selectedPlotId}`,
+      });
+      rendered.add(selectedPlotId);
+    }
+
+    // Hovered plot — gold (skip if same as selected)
+    if (
+      hoveredPlotId !== null &&
+      hoveredPlotId !== selectedPlotId &&
+      hoveredPlotId >= 0 &&
+      hoveredPlotId < plots.length
+    ) {
+      items.push({
+        geo: buildFilledHexGeometry(hoveredPlotId, plots),
+        color: "#ffd700",
+        opacity: 0.28,
+        key: `hovered-${hoveredPlotId}`,
+      });
+    }
+
+    return items;
+  }, [hoveredPlotId, selectedPlotId, ownedPlots, plots]);
+
+  return (
+    <>
+      {meshes.map(({ geo, color, opacity, key }) => (
+        <mesh key={key} geometry={geo}>
+          <meshBasicMaterial
+            color={color}
+            transparent
+            opacity={opacity}
+            depthWrite={false}
+            side={THREE.DoubleSide}
+          />
+        </mesh>
+      ))}
+    </>
+  );
+}
+
 function EarthSphere() {
   const dayTex = useTexture("/assets/generated/earth-day.dim_4096x2048.jpg");
   const cloudsTex = useTexture(
@@ -110,7 +217,9 @@ function EarthSphere() {
   const globeRef = useRef<THREE.Group>(null);
   const cloudsRef = useRef<THREE.Mesh>(null);
   const selectPlot = useGameStore((s) => s.selectPlot);
+  const setHoveredPlotId = useGameStore((s) => s.setHoveredPlotId);
   const plots = useGameStore((s) => s.plots);
+  const lastMoveTime = useRef(0);
 
   const atmosphereUniforms = useMemo(
     () => ({ glowColor: { value: new THREE.Color(0.1, 0.5, 1.0) } }),
@@ -122,10 +231,7 @@ function EarthSphere() {
     if (cloudsRef.current) cloudsRef.current.rotation.y += 0.0003;
   });
 
-  // biome-ignore lint/a11y/useKeyWithClickEvents: 3D canvas object
-  const handleClick = (e: any) => {
-    e.stopPropagation();
-    const point: THREE.Vector3 = e.point;
+  function findNearestPlot(point: THREE.Vector3): number {
     const n = point.clone().normalize();
     const phi = Math.acos(n.y);
     const theta = Math.atan2(n.z, -n.x);
@@ -141,13 +247,36 @@ function EarthSphere() {
         nearest = i;
       }
     }
+    return nearest;
+  }
+
+  // biome-ignore lint/a11y/useKeyWithClickEvents: 3D canvas object
+  const handleClick = (e: any) => {
+    e.stopPropagation();
+    const nearest = findNearestPlot(e.point);
     selectPlot(nearest);
+  };
+
+  const handlePointerMove = (e: any) => {
+    const now = performance.now();
+    if (now - lastMoveTime.current < 50) return;
+    lastMoveTime.current = now;
+    const nearest = findNearestPlot(e.point);
+    setHoveredPlotId(nearest);
+  };
+
+  const handlePointerLeave = () => {
+    setHoveredPlotId(null);
   };
 
   return (
     <group ref={globeRef}>
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: 3D canvas mesh */}
-      <mesh onClick={handleClick}>
+      <mesh
+        onClick={handleClick}
+        onPointerMove={handlePointerMove}
+        onPointerLeave={handlePointerLeave}
+      >
         <sphereGeometry args={[1, 64, 64]} />
         <meshPhongMaterial
           map={dayTex}
@@ -181,6 +310,7 @@ function EarthSphere() {
       </mesh>
 
       <HexGrid />
+      <HexHighlights />
     </group>
   );
 }

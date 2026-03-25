@@ -74,6 +74,8 @@ export interface PlayerData {
   commanderType: string | null;
   commanderAtk: number;
   commanderDef: number;
+  faction: string | null;
+  weaponInventory: Record<string, number>;
 }
 
 export interface CombatEntry {
@@ -114,6 +116,14 @@ export interface PlotHoverCard {
   owner: string;
   action: string;
   nextStep: string;
+}
+
+export type PlayerRank = "Lieutenant" | "Captain" | "Colonel" | "General";
+
+export interface RankStats {
+  missionsLaunched: number;
+  plotsOwned: number;
+  combatWins: number;
 }
 
 function generateSubParcels(plotId: number): SubParcel[] {
@@ -197,9 +207,9 @@ function generatePlots(): PlotData[] {
       biome,
       richness,
       owner,
-      iron: owner ? (i % 8) * richness : 0,
-      fuel: owner ? (i % 5) * richness : 0,
-      crystal: owner ? (i % 6) * richness : 0,
+      iron: 0,
+      fuel: 0,
+      crystal: 0,
       defenses: owner
         ? {
             turrets: i % 4,
@@ -268,11 +278,16 @@ interface GameState {
   orbitalEvent: OrbitalEvent | null;
   subParcels: Record<number, SubParcel[]>;
   activeWeapon: string | null;
+  hoveredPlotId: number | null;
   plotHoverCard: PlotHoverCard | null;
+  commanderAssignments: Record<number, string>;
+  rankStats: RankStats;
 
   selectPlot: (id: number | null) => void;
   purchasePlot: (id: number) => void;
   claimResources: (id: number) => void;
+  claimAllFrntr: (amount: number) => void;
+  mintTestTokens: () => void;
   attack: (fromId: number, toId: number) => void;
   setAuth: (principal: string | null) => void;
   getSubParcels: (plotId: number) => SubParcel[];
@@ -285,20 +300,35 @@ interface GameState {
   setActiveWeapon: (weapon: string | null) => void;
   setTargetPlotId: (id: number | null) => void;
   setPlotHoverCard: (card: PlotHoverCard | null) => void;
+  setHoveredPlotId: (id: number | null) => void;
+  setFaction: (faction: string | null) => void;
+  buyWeapon: (weaponName: string) => void;
+  selectCommander: (name: string, atk: number, def: number) => void;
+  assignCommanderToPlot: (plotId: number, commanderName: string) => void;
+  removeCommanderFromPlot: (plotId: number) => void;
 }
 
 export const useGameStore = create<GameState>((set, get) => ({
   plots: ALL_PLOTS,
   player: {
     principal: null,
-    iron: 250,
-    fuel: 180,
-    crystal: 95,
-    frntBalance: 1250,
+    iron: 0,
+    fuel: 0,
+    crystal: 0,
+    frntBalance: 0,
     plotsOwned: [],
     commanderType: null,
     commanderAtk: 0,
     commanderDef: 0,
+    faction: null,
+    weaponInventory: {
+      "BALLISTIC ICBM": 8,
+      "CRUISE MISSILE": 12,
+      "EMP WARHEAD": 3,
+      "MIRV STRIKE": 2,
+      INTERCEPTOR: 15,
+      "ORBITAL RAIL": 1,
+    },
   },
   selectedPlotId: null,
   targetPlotId: null,
@@ -311,7 +341,14 @@ export const useGameStore = create<GameState>((set, get) => ({
   },
   subParcels: {},
   activeWeapon: null,
+  hoveredPlotId: null,
   plotHoverCard: null,
+  commanderAssignments: {},
+  rankStats: {
+    missionsLaunched: 0,
+    plotsOwned: 0,
+    combatWins: 0,
+  },
 
   selectPlot: (id) => set({ selectedPlotId: id }),
 
@@ -320,6 +357,43 @@ export const useGameStore = create<GameState>((set, get) => ({
   setTargetPlotId: (id) => set({ targetPlotId: id }),
 
   setPlotHoverCard: (card) => set({ plotHoverCard: card }),
+  setHoveredPlotId: (id) => set({ hoveredPlotId: id }),
+
+  setFaction: (faction) =>
+    set((state) => ({ player: { ...state.player, faction } })),
+
+  selectCommander: (name, atk, def) =>
+    set((state) => ({
+      player: {
+        ...state.player,
+        commanderType: name,
+        commanderAtk: atk,
+        commanderDef: def,
+      },
+    })),
+
+  buyWeapon: (weaponName) =>
+    set((state) => {
+      const costs: Record<string, number> = {
+        "BALLISTIC ICBM": 300,
+        "CRUISE MISSILE": 150,
+        "EMP WARHEAD": 200,
+        "MIRV STRIKE": 500,
+        INTERCEPTOR: 80,
+        "ORBITAL RAIL": 800,
+      };
+      const cost = costs[weaponName] ?? 0;
+      if (state.player.frntBalance < cost) return state;
+      const inv = { ...state.player.weaponInventory };
+      inv[weaponName] = (inv[weaponName] ?? 0) + 1;
+      return {
+        player: {
+          ...state.player,
+          frntBalance: state.player.frntBalance - cost,
+          weaponInventory: inv,
+        },
+      };
+    }),
 
   getSubParcels: (plotId) => {
     const state = get();
@@ -359,8 +433,29 @@ export const useGameStore = create<GameState>((set, get) => ({
           frntBalance: state.player.frntBalance - 100,
           plotsOwned: [...state.player.plotsOwned, id],
         },
+        rankStats: {
+          ...state.rankStats,
+          plotsOwned: state.rankStats.plotsOwned + 1,
+        },
       };
     }),
+
+  claimAllFrntr: (amount: number) =>
+    set((state) => ({
+      player: {
+        ...state.player,
+        frntBalance:
+          state.player.frntBalance + (Number.isNaN(amount) ? 0 : amount),
+      },
+    })),
+
+  mintTestTokens: () =>
+    set((state) => ({
+      player: {
+        ...state.player,
+        frntBalance: state.player.frntBalance + 500,
+      },
+    })),
 
   claimResources: (id) =>
     set((state) => {
@@ -420,13 +515,35 @@ export const useGameStore = create<GameState>((set, get) => ({
         ? {
             ...s.player,
             plotsOwned: [...s.player.plotsOwned, toId],
-            combatVictories:
-              (s.player as PlayerData & { combatVictories?: number })
-                .combatVictories ?? 0,
           }
         : s.player,
+      rankStats: {
+        ...s.rankStats,
+        missionsLaunched: s.rankStats.missionsLaunched + 1,
+        combatWins: success
+          ? s.rankStats.combatWins + 1
+          : s.rankStats.combatWins,
+      },
     }));
   },
+
+  assignCommanderToPlot: (plotId, commanderName) =>
+    set((state) => {
+      if (!state.player.plotsOwned.includes(plotId)) return state;
+      return {
+        commanderAssignments: {
+          ...state.commanderAssignments,
+          [plotId]: commanderName,
+        },
+      };
+    }),
+
+  removeCommanderFromPlot: (plotId) =>
+    set((state) => {
+      const next = { ...state.commanderAssignments };
+      delete next[plotId];
+      return { commanderAssignments: next };
+    }),
 
   setAuth: (principal) =>
     set((state) => ({

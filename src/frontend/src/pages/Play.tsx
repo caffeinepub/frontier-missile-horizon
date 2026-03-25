@@ -1,6 +1,5 @@
 import {
   ChevronDown,
-  Crosshair,
   Grid2x2,
   Map as MapIcon,
   MoreHorizontal,
@@ -9,15 +8,16 @@ import {
   Shield,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import CombatLog from "../components/CombatLog";
 import CommandCenter from "../components/CommandCenter";
 import CommandPanel from "../components/CommandPanel";
 import CountdownOverlay from "../components/CountdownOverlay";
 import GlobeCanvas from "../components/GlobeCanvas";
 import LeftSidebarHUD from "../components/LeftSidebarHUD";
+import LieutenantRankCard from "../components/LieutenantRankCard";
 import MapBottomSheet from "../components/MapBottomSheet";
 import Navbar from "../components/Navbar";
 import PlotHoverCard from "../components/PlotHoverCard";
+import SmokeTestPanel from "../components/SmokeTestPanel";
 import { useGameStore } from "../store/gameStore";
 
 const CYAN = "#00ffcc";
@@ -44,10 +44,36 @@ const NAV_ITEMS = [
 ];
 
 const COMMANDERS = [
-  { name: "NOVA PRIME", atk: 85, def: 72, rarity: "LEGENDARY" },
-  { name: "IRON CLAW", atk: 70, def: 90, rarity: "EPIC" },
-  { name: "PHANTOM OPS", atk: 95, def: 55, rarity: "LEGENDARY" },
-  { name: "VOID HUNTER", atk: 62, def: 81, rarity: "RARE" },
+  {
+    name: "NOVA PRIME",
+    atk: 85,
+    def: 72,
+    rarity: "LEGENDARY",
+    image: "/assets/generated/commander-nova-prime-transparent.dim_300x300.png",
+  },
+  {
+    name: "IRON CLAW",
+    atk: 70,
+    def: 90,
+    rarity: "EPIC",
+    image: "/assets/generated/commander-iron-claw-transparent.dim_300x300.png",
+  },
+  {
+    name: "PHANTOM OPS",
+    atk: 95,
+    def: 55,
+    rarity: "LEGENDARY",
+    image:
+      "/assets/generated/commander-phantom-ops-transparent.dim_300x300.png",
+  },
+  {
+    name: "VOID HUNTER",
+    atk: 62,
+    def: 81,
+    rarity: "RARE",
+    image:
+      "/assets/generated/commander-void-hunter-transparent.dim_300x300.png",
+  },
 ];
 
 interface TopBarProps {
@@ -166,131 +192,43 @@ function TopBar({ onOpenCommandCenter }: TopBarProps) {
   );
 }
 
-interface JoystickProps {
-  controlsRef: React.MutableRefObject<any>;
-}
-
-function VirtualJoystick({ controlsRef }: JoystickProps) {
-  const dotRef = useRef<HTMLDivElement>(null);
-  const tracking = useRef(false);
-  const startPos = useRef({ x: 0, y: 0 });
-  const currentDelta = useRef({ x: 0, y: 0 });
-  const rafRef = useRef<number | null>(null);
-
-  const applyCamera = useCallback(() => {
-    const c = controlsRef.current;
-    if (!c) return;
-    const dx = currentDelta.current.x * 0.0015;
-    const dy = currentDelta.current.y * 0.0015;
-    if (Math.abs(dx) > 0.0001 || Math.abs(dy) > 0.0001) {
-      (c as any).rotateLeft?.(dx);
-      (c as any).rotateUp?.(dy);
-      c.update?.();
-    }
-    if (tracking.current) rafRef.current = requestAnimationFrame(applyCamera);
-  }, [controlsRef]);
-
-  const onPointerDown = (e: React.PointerEvent) => {
-    tracking.current = true;
-    startPos.current = { x: e.clientX, y: e.clientY };
-    currentDelta.current = { x: 0, y: 0 };
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-    rafRef.current = requestAnimationFrame(applyCamera);
-  };
-
-  const onPointerMove = (e: React.PointerEvent) => {
-    if (!tracking.current) return;
-    const maxD = 26;
-    let dx = e.clientX - startPos.current.x;
-    let dy = e.clientY - startPos.current.y;
-    const dist = Math.hypot(dx, dy);
-    if (dist > maxD) {
-      dx = (dx / dist) * maxD;
-      dy = (dy / dist) * maxD;
-    }
-    currentDelta.current = { x: dx, y: dy };
-    if (dotRef.current)
-      dotRef.current.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
-  };
-
-  const onPointerUp = () => {
-    tracking.current = false;
-    currentDelta.current = { x: 0, y: 0 };
-    if (dotRef.current)
-      dotRef.current.style.transform = "translate(-50%, -50%)";
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-  };
-
-  return (
-    <div
-      data-ocid="combat.joystick.canvas_target"
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onPointerCancel={onPointerUp}
-      style={{
-        position: "fixed",
-        left: 16,
-        bottom: 96,
-        width: 80,
-        height: 80,
-        borderRadius: "50%",
-        background: "rgba(0,255,204,0.06)",
-        border: "1px solid rgba(0,255,204,0.4)",
-        touchAction: "none",
-        userSelect: "none",
-        zIndex: 30,
-        cursor: "crosshair",
-      }}
-    >
-      <div
-        style={{
-          position: "absolute",
-          top: "50%",
-          left: "50%",
-          transform: "translate(-50%, -50%)",
-          width: 50,
-          height: 50,
-          borderRadius: "50%",
-          border: "1px solid rgba(0,255,204,0.2)",
-          pointerEvents: "none",
-        }}
-      />
-      <div
-        ref={dotRef}
-        style={{
-          position: "absolute",
-          top: "50%",
-          left: "50%",
-          transform: "translate(-50%, -50%)",
-          width: 28,
-          height: 28,
-          borderRadius: "50%",
-          background: "rgba(0,255,204,0.6)",
-          boxShadow: `0 0 10px ${CYAN}`,
-          pointerEvents: "none",
-          transition: "transform 0.15s ease-out",
-        }}
-      />
-    </div>
-  );
-}
-
 interface BottomNavProps {
   activeTab: string | null;
   onTabClick: (id: string) => void;
 }
 
 function BottomNavBar({ activeTab, onTabClick }: BottomNavProps) {
+  const [windowHeight, setWindowHeight] = useState(() =>
+    typeof window !== "undefined" ? window.innerHeight : 800,
+  );
+  useEffect(() => {
+    const handler = () => setWindowHeight(window.innerHeight);
+    window.addEventListener("resize", handler);
+    window.addEventListener("orientationchange", handler);
+    return () => {
+      window.removeEventListener("resize", handler);
+      window.removeEventListener("orientationchange", handler);
+    };
+  }, []);
+
+  const isLandscape = windowHeight < 500;
+  const navHeight = isLandscape ? 44 : 64;
+
   return (
     <div
       data-ocid="nav.panel"
-      className="fixed bottom-0 left-0 right-0 z-40 flex"
       style={{
-        height: 64,
+        position: "fixed",
+        bottom: 0,
+        left: 0,
+        right: 0,
+        zIndex: 60,
+        height: navHeight,
+        display: "flex",
         background: "rgba(2,10,20,0.97)",
         borderTop: "1px solid rgba(0,255,204,0.3)",
         paddingBottom: "env(safe-area-inset-bottom)",
+        boxSizing: "border-box",
       }}
     >
       {NAV_ITEMS.map(({ id, label, Icon }) => {
@@ -307,7 +245,7 @@ function BottomNavBar({ activeTab, onTabClick }: BottomNavProps) {
               flexDirection: "column",
               alignItems: "center",
               justifyContent: "center",
-              gap: 2,
+              gap: isLandscape ? 0 : 2,
               background: isActive ? "rgba(0,255,204,0.07)" : "transparent",
               border: "none",
               borderTop: isActive
@@ -334,23 +272,25 @@ function BottomNavBar({ activeTab, onTabClick }: BottomNavProps) {
               />
             )}
             <Icon
-              size={18}
+              size={isLandscape ? 16 : 18}
               color={isActive ? CYAN : CYAN_DIM}
               style={{
                 filter: isActive ? `drop-shadow(0 0 4px ${CYAN})` : "none",
               }}
             />
-            <span
-              style={{
-                fontSize: 7.5,
-                letterSpacing: 0.5,
-                color: isActive ? CYAN : CYAN_DIM,
-                fontWeight: isActive ? 700 : 400,
-                textShadow: isActive ? `0 0 8px ${CYAN}` : "none",
-              }}
-            >
-              {label}
-            </span>
+            {!isLandscape && (
+              <span
+                style={{
+                  fontSize: 7.5,
+                  letterSpacing: 0.5,
+                  color: isActive ? CYAN : CYAN_DIM,
+                  fontWeight: isActive ? 700 : 400,
+                  textShadow: isActive ? `0 0 8px ${CYAN}` : "none",
+                }}
+              >
+                {label}
+              </span>
+            )}
           </button>
         );
       })}
@@ -359,108 +299,332 @@ function BottomNavBar({ activeTab, onTabClick }: BottomNavProps) {
 }
 
 function CommanderSheet() {
+  const player = useGameStore((s) => s.player);
+  const selectCommander = useGameStore((s) => s.selectCommander);
+  const assignCommanderToPlot = useGameStore((s) => s.assignCommanderToPlot);
+  const removeCommanderFromPlot = useGameStore(
+    (s) => s.removeCommanderFromPlot,
+  );
+  const commanderAssignments = useGameStore((s) => s.commanderAssignments);
+  const activeCommander = player.commanderType;
+  const [expandedAssign, setExpandedAssign] = useState<string | null>(null);
+
   return (
-    <div style={{ padding: 12 }}>
-      <div
-        style={{
-          fontSize: 8.5,
-          color: CYAN_DIM,
-          letterSpacing: 1.5,
-          marginBottom: 12,
-        }}
-      >
-        SELECT ACTIVE COMMANDER NFT
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-        {COMMANDERS.map((c, i) => (
-          <div
-            key={c.name}
-            data-ocid={`commander.item.${i + 1}`}
-            style={{
-              background: "rgba(0,255,204,0.04)",
-              border: `1px solid ${BORDER}`,
-              borderRadius: 8,
-              padding: "10px",
-              display: "flex",
-              flexDirection: "column",
-              gap: 7,
-              alignItems: "center",
-            }}
-          >
-            {/* Hex avatar placeholder */}
-            <div
-              style={{
-                width: 60,
-                height: 60,
-                clipPath:
-                  "polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)",
-                background:
-                  "linear-gradient(135deg, rgba(0,255,204,0.15), rgba(0,100,80,0.3))",
-                border: `1px solid ${CYAN}44`,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: 22,
-              }}
-            >
-              👤
-            </div>
-            <div
-              style={{
-                fontSize: 9,
-                fontWeight: 700,
-                color: TEXT,
-                letterSpacing: 0.5,
-                textAlign: "center",
-              }}
-            >
-              {c.name}
-            </div>
-            <div style={{ display: "flex", gap: 6, justifyContent: "center" }}>
-              <span style={{ fontSize: 8, color: "#ef4444" }}>ATK {c.atk}</span>
-              <span style={{ fontSize: 8, color: "#3b82f6" }}>DEF {c.def}</span>
-            </div>
-            <div
-              style={{
-                fontSize: 7.5,
-                padding: "2px 8px",
-                borderRadius: 3,
-                background:
-                  c.rarity === "LEGENDARY"
-                    ? "rgba(255,215,0,0.1)"
-                    : "rgba(168,85,247,0.1)",
-                border: `1px solid ${c.rarity === "LEGENDARY" ? `${GOLD}66` : "#a855f766"}`,
-                color: c.rarity === "LEGENDARY" ? GOLD : "#a855f7",
-                letterSpacing: 0.5,
-              }}
-            >
-              {c.rarity}
-            </div>
-            <div
-              style={{ fontSize: 7.5, color: "#22c55e", letterSpacing: 0.5 }}
-            >
-              • NFT IN WALLET
-            </div>
-            <button
-              type="button"
-              data-ocid={`commander.item.${i + 1}.button`}
-              style={{
-                width: "100%",
-                padding: "5px",
-                background: "transparent",
-                border: "1px solid #ef444466",
-                borderRadius: 4,
-                color: "#ef4444",
-                fontSize: 8,
-                fontWeight: 700,
-                letterSpacing: 1,
-                cursor: "pointer",
-              }}
-            >
-              SELECT TO PLAY
-            </button>
-          </div>
-        ))}
+    <div>
+      {/* Rank Card — always shown at top of COMMANDER tab */}
+      <LieutenantRankCard />
+
+      <div style={{ padding: "0 12px 12px" }}>
+        <div
+          style={{
+            fontSize: 8.5,
+            color: CYAN_DIM,
+            letterSpacing: 1.5,
+            marginBottom: 4,
+          }}
+        >
+          SELECT ACTIVE COMMANDER NFT
+        </div>
+        <div
+          data-ocid="commander.panel"
+          style={{
+            fontSize: 8,
+            color: activeCommander ? CYAN : "rgba(0,255,204,0.4)",
+            letterSpacing: 1,
+            marginBottom: 12,
+            fontFamily: "monospace",
+          }}
+        >
+          {activeCommander
+            ? `ACTIVE COMMANDER: ${activeCommander}`
+            : "NO COMMANDER SELECTED"}
+        </div>
+        <div
+          style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}
+        >
+          {COMMANDERS.map((c, i) => {
+            const isActive = activeCommander === c.name;
+            return (
+              <div
+                key={c.name}
+                data-ocid={`commander.item.${i + 1}`}
+                style={{
+                  background: isActive
+                    ? "rgba(0,255,204,0.08)"
+                    : "rgba(0,255,204,0.04)",
+                  border: isActive
+                    ? `1px solid ${CYAN}`
+                    : `1px solid ${BORDER}`,
+                  borderRadius: 8,
+                  padding: "10px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 7,
+                  alignItems: "center",
+                  boxShadow: isActive ? "0 0 16px rgba(0,255,204,0.5)" : "none",
+                  transition: "all 0.2s",
+                }}
+              >
+                {/* Hex avatar portrait */}
+                <div
+                  style={{
+                    width: 60,
+                    height: 60,
+                    clipPath:
+                      "polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)",
+                    overflow: "hidden",
+                    border: `1px solid ${isActive ? CYAN : `${CYAN}44`}`,
+                    flexShrink: 0,
+                  }}
+                >
+                  <img
+                    src={c.image}
+                    alt={c.name}
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      objectFit: "cover",
+                      objectPosition: "center top",
+                      display: "block",
+                    }}
+                  />
+                </div>
+                <div
+                  style={{
+                    fontSize: 9,
+                    fontWeight: 700,
+                    color: isActive ? CYAN : TEXT,
+                    letterSpacing: 0.5,
+                    textAlign: "center",
+                  }}
+                >
+                  {c.name}
+                </div>
+                <div
+                  style={{ display: "flex", gap: 6, justifyContent: "center" }}
+                >
+                  <span style={{ fontSize: 8, color: "#ef4444" }}>
+                    ATK {c.atk}
+                  </span>
+                  <span style={{ fontSize: 8, color: "#3b82f6" }}>
+                    DEF {c.def}
+                  </span>
+                </div>
+                <div
+                  style={{
+                    fontSize: 7.5,
+                    padding: "2px 8px",
+                    borderRadius: 3,
+                    background:
+                      c.rarity === "LEGENDARY"
+                        ? "rgba(255,215,0,0.1)"
+                        : "rgba(168,85,247,0.1)",
+                    border: `1px solid ${
+                      c.rarity === "LEGENDARY" ? `${GOLD}66` : "#a855f766"
+                    }`,
+                    color: c.rarity === "LEGENDARY" ? GOLD : "#a855f7",
+                    letterSpacing: 0.5,
+                  }}
+                >
+                  {c.rarity}
+                </div>
+                <div
+                  style={{
+                    fontSize: 7.5,
+                    color: "#22c55e",
+                    letterSpacing: 0.5,
+                  }}
+                >
+                  • NFT IN WALLET
+                </div>
+                {isActive ? (
+                  <div
+                    data-ocid={`commander.item.${i + 1}.button`}
+                    style={{
+                      width: "100%",
+                      padding: "5px",
+                      background: `${CYAN}18`,
+                      border: `1px solid ${CYAN}66`,
+                      borderRadius: 4,
+                      color: CYAN,
+                      fontSize: 8,
+                      fontWeight: 700,
+                      letterSpacing: 1,
+                      textAlign: "center",
+                      fontFamily: "monospace",
+                    }}
+                  >
+                    ✓ ACTIVE
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    data-ocid={`commander.item.${i + 1}.button`}
+                    onClick={() => selectCommander(c.name, c.atk, c.def)}
+                    style={{
+                      width: "100%",
+                      padding: "5px",
+                      background: "transparent",
+                      border: "1px solid #ef444466",
+                      borderRadius: 4,
+                      color: "#ef4444",
+                      fontSize: 8,
+                      fontWeight: 700,
+                      letterSpacing: 1,
+                      cursor: "pointer",
+                      fontFamily: "monospace",
+                    }}
+                  >
+                    SELECT TO PLAY
+                  </button>
+                )}
+                {/* DEPLOY / ASSIGN TO PLOT */}
+                {isActive && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setExpandedAssign(
+                          expandedAssign === c.name ? null : c.name,
+                        )
+                      }
+                      style={{
+                        width: "100%",
+                        padding: "5px",
+                        background: "transparent",
+                        border: `1px solid ${CYAN}44`,
+                        borderRadius: 4,
+                        color: CYAN,
+                        fontSize: 8,
+                        fontWeight: 700,
+                        letterSpacing: 1,
+                        cursor: "pointer",
+                        fontFamily: "monospace",
+                        marginTop: 2,
+                      }}
+                    >
+                      DEPLOY {expandedAssign === c.name ? "▴" : "▾"}
+                    </button>
+                    {expandedAssign === c.name && (
+                      <div
+                        style={{
+                          width: "100%",
+                          background: "rgba(0,255,204,0.03)",
+                          border: `1px solid ${BORDER}`,
+                          borderRadius: 6,
+                          padding: "8px 6px",
+                          marginTop: 4,
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontSize: 7.5,
+                            color: CYAN_DIM,
+                            letterSpacing: 1.5,
+                            fontFamily: "monospace",
+                            marginBottom: 6,
+                          }}
+                        >
+                          ASSIGN TO PLOT
+                        </div>
+                        {player.plotsOwned.length === 0 ? (
+                          <div
+                            style={{
+                              fontSize: 8,
+                              color: "rgba(0,255,204,0.3)",
+                              fontFamily: "monospace",
+                            }}
+                          >
+                            No plots owned yet
+                          </div>
+                        ) : (
+                          <div
+                            style={{
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: 4,
+                            }}
+                          >
+                            {player.plotsOwned.map((pid) => {
+                              const assigned =
+                                commanderAssignments[pid] === c.name;
+                              return (
+                                <div
+                                  key={pid}
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "space-between",
+                                    minHeight: 36,
+                                    padding: "0 4px",
+                                    borderBottom: `1px solid ${BORDER}`,
+                                  }}
+                                >
+                                  <span
+                                    style={{
+                                      fontSize: 8,
+                                      color: assigned
+                                        ? CYAN
+                                        : "rgba(0,255,204,0.6)",
+                                      fontFamily: "monospace",
+                                    }}
+                                  >
+                                    PLOT #{pid}
+                                  </span>
+                                  {assigned ? (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        removeCommanderFromPlot(pid)
+                                      }
+                                      style={{
+                                        fontSize: 7.5,
+                                        color: CYAN,
+                                        background: `${CYAN}18`,
+                                        border: `1px solid ${CYAN}66`,
+                                        borderRadius: 3,
+                                        padding: "3px 6px",
+                                        cursor: "pointer",
+                                        fontFamily: "monospace",
+                                        letterSpacing: 0.5,
+                                      }}
+                                    >
+                                      ASSIGNED ✓
+                                    </button>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        assignCommanderToPlot(pid, c.name)
+                                      }
+                                      style={{
+                                        fontSize: 7.5,
+                                        color: CYAN,
+                                        background: "transparent",
+                                        border: `1px solid ${CYAN}66`,
+                                        borderRadius: 3,
+                                        padding: "3px 6px",
+                                        cursor: "pointer",
+                                        fontFamily: "monospace",
+                                        letterSpacing: 0.5,
+                                      }}
+                                    >
+                                      ASSIGN
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
@@ -657,6 +821,30 @@ function BottomSheet({ activeTab, onClose, controlsRef }: BottomSheetProps) {
   const isMapTab = activeTab === "map";
   const sheetHeight = isMapTab ? "75vh" : "55vh";
 
+  const [windowWidth, setWindowWidth] = useState(() =>
+    typeof window !== "undefined" ? window.innerWidth : 1024,
+  );
+  const [windowHeight, setWindowHeight] = useState(() =>
+    typeof window !== "undefined" ? window.innerHeight : 800,
+  );
+  useEffect(() => {
+    const handler = () => {
+      setWindowWidth(window.innerWidth);
+      setWindowHeight(window.innerHeight);
+    };
+    window.addEventListener("resize", handler);
+    window.addEventListener("orientationchange", handler);
+    return () => {
+      window.removeEventListener("resize", handler);
+      window.removeEventListener("orientationchange", handler);
+    };
+  }, []);
+  const isMobile = windowWidth < 768;
+  const isLandscape = windowHeight < 500;
+  const navHeight = isLandscape ? 44 : 64;
+  // On mobile MAP tab, offset sheet above the 60px collapsed CommandPanel + navHeight
+  const sheetBottom = isMapTab && isMobile ? navHeight + 64 : navHeight;
+
   return (
     <>
       {isOpen && (
@@ -666,7 +854,10 @@ function BottomSheet({ activeTab, onClose, controlsRef }: BottomSheetProps) {
           onClick={onClose}
           style={{
             position: "fixed",
-            inset: 0,
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: navHeight,
             background: "rgba(0,0,0,0.4)",
             zIndex: 45,
           }}
@@ -676,7 +867,7 @@ function BottomSheet({ activeTab, onClose, controlsRef }: BottomSheetProps) {
         data-ocid="nav.sheet"
         style={{
           position: "fixed",
-          bottom: 0,
+          bottom: sheetBottom,
           left: "50%",
           transform: isOpen ? "translate(-50%, 0)" : "translate(-50%, 100%)",
           width: "min(100%, 480px)",
@@ -687,7 +878,8 @@ function BottomSheet({ activeTab, onClose, controlsRef }: BottomSheetProps) {
           borderLeft: `1px solid ${BORDER}`,
           borderRight: `1px solid ${BORDER}`,
           borderRadius: "16px 16px 0 0",
-          transition: "transform 0.3s ease-out, height 0.3s ease-out",
+          transition:
+            "transform 0.3s ease-out, height 0.3s ease-out, bottom 0.2s ease-out",
           display: "flex",
           flexDirection: "column",
           backdropFilter: "blur(16px)",
@@ -750,7 +942,16 @@ function BottomSheet({ activeTab, onClose, controlsRef }: BottomSheetProps) {
             <ChevronDown size={16} />
           </button>
         </div>
-        <div style={{ overflowY: isMapTab ? "hidden" : "auto", flex: 1 }}>
+        <div
+          style={{
+            overflowY: isMapTab ? "hidden" : "auto",
+            flex: 1,
+            minHeight: 0,
+            height: "100%",
+            display: "flex",
+            flexDirection: "column",
+          }}
+        >
           {activeTab && (
             <SheetContent
               tab={activeTab}
@@ -816,7 +1017,6 @@ export default function Play() {
       <Navbar />
       <TopBar onOpenCommandCenter={() => setCommandCenterOpen(true)} />
       <LeftSidebarHUD />
-      <VirtualJoystick controlsRef={controlsRef} />
       <CommandPanel
         onFire={handleFire}
         fireDisabled={missileActive || showCountdown || selectedPlotId === null}
@@ -824,7 +1024,6 @@ export default function Play() {
         onToggleCombatLog={() => {}}
       />
       <BottomNavBar activeTab={activeTab} onTabClick={handleTabClick} />
-      <CombatLog />
       <BottomSheet
         activeTab={activeTab}
         onClose={() => setActiveTab(null)}
@@ -950,6 +1149,7 @@ export default function Play() {
           CAFFEINE.AI
         </a>
       </div>
+      <SmokeTestPanel />
     </div>
   );
 }

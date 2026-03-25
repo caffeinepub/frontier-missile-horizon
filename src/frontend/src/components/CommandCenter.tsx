@@ -1,5 +1,6 @@
-import { Gem, X, Zap } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { X, Zap } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { BIOME_TIER, MINERAL_USES, TIER_MINERALS } from "../constants/minerals";
 import { useGameStore } from "../store/gameStore";
 
 const CYAN = "#00ffcc";
@@ -8,39 +9,6 @@ const GOLD = "#ffd700";
 const BG = "rgba(4,12,24,0.97)";
 const BORDER = "rgba(0,255,204,0.22)";
 const TEXT = "#e0f4ff";
-
-const MOCK_PLOTS = [
-  {
-    id: 9144,
-    biome: "Desert",
-    iron: 42,
-    fuel: 18,
-    crystal: 7,
-    level: 3,
-    frntDay: 50.0,
-    frntAcc: 363.92,
-  },
-  {
-    id: 9301,
-    biome: "Forest",
-    iron: 31,
-    fuel: 24,
-    crystal: 12,
-    level: 2,
-    frntDay: 50.0,
-    frntAcc: 363.92,
-  },
-  {
-    id: 8309,
-    biome: "Mountain",
-    iron: 55,
-    fuel: 9,
-    crystal: 4,
-    level: 4,
-    frntDay: 50.0,
-    frntAcc: 363.92,
-  },
-];
 
 const BIOME_COLORS: Record<string, string> = {
   Arctic: "#a8d8ea",
@@ -53,6 +21,10 @@ const BIOME_COLORS: Record<string, string> = {
   Toxic: "#7dba3a",
 };
 
+const BASE_RATE = 50.0; // FRNTR/day per plot
+const SUB_PARCEL_RATE = 10.0; // FRNTR/day per unlocked edge sub-parcel
+const MS_PER_DAY = 86400000;
+
 interface CommandCenterProps {
   open: boolean;
   onClose: () => void;
@@ -61,31 +33,55 @@ interface CommandCenterProps {
 export default function CommandCenter({ open, onClose }: CommandCenterProps) {
   const player = useGameStore((s) => s.player);
   const plots = useGameStore((s) => s.plots);
-  const [searchQuery, setSearchQuery] = useState("");
+  const getSubParcels = useGameStore((s) => s.getSubParcels);
+  const claimResources = useGameStore((s) => s.claimResources);
+  const claimAllFrntr = useGameStore((s) => s.claimAllFrntr);
 
+  const [searchQuery, setSearchQuery] = useState("");
+  const [elapsed, setElapsed] = useState(0);
+  const startRef = useRef<number>(Date.now());
+
+  // Live counter — ticks every second
+  useEffect(() => {
+    const id = setInterval(() => {
+      setElapsed(Date.now() - startRef.current);
+    }, 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Build per-plot data from real owned plots only
   const ownedPlotData = player.plotsOwned
     .map((id) => plots.find((p) => p.id === id))
     .filter(Boolean)
-    .map((p) => ({
-      id: p!.id,
-      biome: p!.biome as string,
-      iron: p!.iron,
-      fuel: p!.fuel,
-      crystal: p!.crystal,
-      level: Math.max(1, Math.floor(p!.richness / 3)),
-      frntDay: 50.0,
-      frntAcc: 363.92,
-    }));
+    .map((p) => {
+      const subParcels = getSubParcels(p!.id);
+      const unlockedEdge = subParcels.filter(
+        (sp) => sp.subId > 0 && sp.unlocked === true,
+      ).length;
+      const dayRate = BASE_RATE + unlockedEdge * SUB_PARCEL_RATE;
+      const accumulated = (dayRate / MS_PER_DAY) * elapsed;
+      return {
+        id: p!.id,
+        biome: p!.biome as string,
+        dayRate,
+        accumulated: Number.isNaN(accumulated) ? 0 : accumulated,
+        unlockedEdge,
+      };
+    });
 
-  const displayPlots = ownedPlotData.length > 0 ? ownedPlotData : MOCK_PLOTS;
-  const totalAcc = displayPlots.reduce((s, p) => s + p.frntAcc, 0);
-  const totalDay = displayPlots.reduce((s, p) => s + p.frntDay, 0);
-  const totalIron = displayPlots.reduce((s, p) => s + p.iron, 0);
-  const totalFuel = displayPlots.reduce((s, p) => s + p.fuel, 0);
-  const totalCrystal = displayPlots.reduce((s, p) => s + p.crystal, 0);
-  const filtered = displayPlots.filter(
+  const totalDayRate = ownedPlotData.reduce((s, p) => s + p.dayRate, 0);
+  const totalAccumulated = ownedPlotData.reduce((s, p) => s + p.accumulated, 0);
+
+  const filtered = ownedPlotData.filter(
     (p) => searchQuery === "" || String(p.id).includes(searchQuery),
   );
+
+  const handleClaim = () => {
+    if (totalAccumulated < 0.0001) return;
+    claimAllFrntr(totalAccumulated);
+    startRef.current = Date.now();
+    setElapsed(0);
+  };
 
   const handleBackdrop = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
@@ -184,9 +180,14 @@ export default function CommandCenter({ open, onClose }: CommandCenterProps) {
             </button>
           </div>
           <div style={{ fontSize: 9, color: CYAN_DIM, letterSpacing: 0.5 }}>
-            {displayPlots.length} plots owned ·{" "}
-            <span style={{ color: GOLD }}>{totalAcc.toFixed(2)} FRNTR</span>{" "}
-            earned lifetime
+            {ownedPlotData.length} plots owned ·{" "}
+            <span style={{ color: GOLD }}>
+              {Number.isNaN(player.frntBalance)
+                ? "0.00"
+                : player.frntBalance.toFixed(2)}{" "}
+              FRNTR
+            </span>{" "}
+            balance
           </div>
         </div>
 
@@ -207,7 +208,7 @@ export default function CommandCenter({ open, onClose }: CommandCenterProps) {
               border: "1px solid rgba(0,255,204,0.35)",
               borderRadius: 8,
               padding: "12px",
-              marginBottom: 8,
+              marginBottom: 10,
             }}
           >
             <div
@@ -238,7 +239,7 @@ export default function CommandCenter({ open, onClose }: CommandCenterProps) {
                     lineHeight: 1,
                   }}
                 >
-                  {totalDay.toFixed(1)}
+                  {Number.isNaN(totalDayRate) ? "0.0" : totalDayRate.toFixed(1)}
                 </div>
                 <div
                   style={{
@@ -248,7 +249,7 @@ export default function CommandCenter({ open, onClose }: CommandCenterProps) {
                     letterSpacing: 0.5,
                   }}
                 >
-                  FRNTR / DAY · across {displayPlots.length} plots
+                  FRNTR / DAY · across {ownedPlotData.length} plots
                 </div>
               </div>
               <div>
@@ -260,7 +261,9 @@ export default function CommandCenter({ open, onClose }: CommandCenterProps) {
                     lineHeight: 1,
                   }}
                 >
-                  {totalAcc.toFixed(2)}
+                  {Number.isNaN(totalAccumulated)
+                    ? "0.0000"
+                    : totalAccumulated.toFixed(4)}
                 </div>
                 <div
                   style={{
@@ -270,125 +273,45 @@ export default function CommandCenter({ open, onClose }: CommandCenterProps) {
                     letterSpacing: 0.5,
                   }}
                 >
-                  ACCUMULATED · ready to mint
+                  ACCUMULATED THIS SESSION
                 </div>
               </div>
             </div>
             <button
               type="button"
-              data-ocid="command_center.mint.button"
+              data-ocid="command_center.claim_all.button"
+              onClick={handleClaim}
+              disabled={totalAccumulated < 0.0001}
               style={{
                 width: "100%",
                 padding: "8px",
-                background: "rgba(0,255,204,0.12)",
-                border: `1px solid ${CYAN}66`,
+                background:
+                  totalAccumulated >= 0.0001
+                    ? "rgba(0,255,204,0.14)"
+                    : "rgba(0,255,204,0.04)",
+                border: `1px solid ${
+                  totalAccumulated >= 0.0001 ? `${CYAN}88` : BORDER
+                }`,
                 borderRadius: 5,
-                color: CYAN,
+                color: totalAccumulated >= 0.0001 ? CYAN : CYAN_DIM,
                 fontSize: 9,
                 fontWeight: 700,
                 letterSpacing: 1.5,
-                cursor: "pointer",
+                cursor: totalAccumulated >= 0.0001 ? "pointer" : "default",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
                 gap: 5,
+                transition: "all 0.2s",
               }}
             >
               <Zap size={11} />
-              MINT FRNTR TOKEN — {totalAcc.toFixed(2)}
+              CLAIM ALL — +
+              {Number.isNaN(totalAccumulated)
+                ? "0.0000"
+                : totalAccumulated.toFixed(4)}{" "}
+              FRNTR
             </button>
-          </div>
-
-          {/* Collect Minerals */}
-          <button
-            type="button"
-            data-ocid="command_center.collect_minerals.button"
-            style={{
-              width: "100%",
-              padding: "8px",
-              background: "transparent",
-              border: `1px solid ${BORDER}`,
-              borderRadius: 5,
-              color: TEXT,
-              fontSize: 9,
-              fontWeight: 600,
-              letterSpacing: 1,
-              cursor: "pointer",
-              marginBottom: 10,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 4,
-            }}
-          >
-            ↓ COLLECT MINERALS — +{totalIron}FE +{totalFuel}FU +{totalCrystal}CR
-          </button>
-
-          {/* Total Resources */}
-          <div
-            style={{
-              background: "rgba(0,255,204,0.03)",
-              border: `1px solid ${BORDER}`,
-              borderRadius: 6,
-              padding: "10px 12px",
-              marginBottom: 10,
-            }}
-          >
-            <div
-              style={{
-                fontSize: 7.5,
-                color: CYAN_DIM,
-                letterSpacing: 1.5,
-                marginBottom: 8,
-                fontWeight: 700,
-              }}
-            >
-              TOTAL RESOURCES EXTRACTED
-            </div>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr 1fr",
-                gap: 6,
-                textAlign: "center",
-              }}
-            >
-              <div>
-                <div
-                  style={{ fontSize: 18, fontWeight: 700, color: "#94a3b8" }}
-                >
-                  {totalIron}
-                </div>
-                <div style={{ fontSize: 7.5, color: CYAN_DIM }}>⚔ IRON</div>
-              </div>
-              <div>
-                <div
-                  style={{ fontSize: 18, fontWeight: 700, color: "#f97316" }}
-                >
-                  {totalFuel}
-                </div>
-                <div style={{ fontSize: 7.5, color: CYAN_DIM }}>🔧 FUEL</div>
-              </div>
-              <div>
-                <div
-                  style={{ fontSize: 18, fontWeight: 700, color: "#3b82f6" }}
-                >
-                  {totalCrystal}
-                </div>
-                <div
-                  style={{
-                    fontSize: 7.5,
-                    color: CYAN_DIM,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: 2,
-                  }}
-                >
-                  <Gem size={9} /> CRYSTAL
-                </div>
-              </div>
-            </div>
           </div>
 
           {/* Territories */}
@@ -402,164 +325,353 @@ export default function CommandCenter({ open, onClose }: CommandCenterProps) {
                 marginBottom: 8,
               }}
             >
-              YOUR TERRITORIES ({displayPlots.length})
+              YOUR TERRITORIES ({ownedPlotData.length})
             </div>
-            <input
-              data-ocid="command_center.search_input"
-              type="text"
-              placeholder="Search by plot ID..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              style={{
-                width: "100%",
-                padding: "7px 10px",
-                background: "rgba(0,0,0,0.5)",
-                border: `1px solid ${BORDER}`,
-                borderRadius: 5,
-                color: TEXT,
-                fontSize: 9,
-                marginBottom: 8,
-                outline: "none",
-                boxSizing: "border-box",
-              }}
-              onFocus={(e) => {
-                e.target.style.borderColor = CYAN;
-              }}
-              onBlur={(e) => {
-                e.target.style.borderColor = BORDER;
-              }}
-            />
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {filtered.map((plot, i) => (
-                <div
-                  key={plot.id}
-                  data-ocid={`command_center.item.${i + 1}`}
+
+            {ownedPlotData.length === 0 ? (
+              <div
+                data-ocid="command_center.territories.empty_state"
+                style={{
+                  textAlign: "center",
+                  padding: "28px 16px",
+                  color: CYAN_DIM,
+                  fontSize: 9,
+                  letterSpacing: 1,
+                  lineHeight: 1.8,
+                  border: `1px dashed ${BORDER}`,
+                  borderRadius: 6,
+                }}
+              >
+                <div style={{ fontSize: 22, marginBottom: 8, opacity: 0.4 }}>
+                  🌐
+                </div>
+                <div style={{ fontWeight: 700, marginBottom: 4 }}>
+                  NO TERRITORIES OWNED
+                </div>
+                <div style={{ fontSize: 8, opacity: 0.7 }}>
+                  Tap a plot on the globe to purchase your first territory
+                </div>
+              </div>
+            ) : (
+              <>
+                <input
+                  data-ocid="command_center.search_input"
+                  type="text"
+                  placeholder="Search by plot ID..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
                   style={{
-                    background: "rgba(0,255,204,0.04)",
+                    width: "100%",
+                    padding: "7px 10px",
+                    background: "rgba(0,0,0,0.5)",
                     border: `1px solid ${BORDER}`,
+                    borderRadius: 5,
+                    color: TEXT,
+                    fontSize: 9,
+                    marginBottom: 8,
+                    outline: "none",
+                    boxSizing: "border-box",
+                  }}
+                  onFocus={(e) => {
+                    e.target.style.borderColor = CYAN;
+                  }}
+                  onBlur={(e) => {
+                    e.target.style.borderColor = BORDER;
+                  }}
+                />
+                <div
+                  style={{ display: "flex", flexDirection: "column", gap: 6 }}
+                >
+                  {filtered.map((plot, i) => (
+                    <div
+                      key={plot.id}
+                      data-ocid={`command_center.item.${i + 1}`}
+                      style={{
+                        background: "rgba(0,255,204,0.04)",
+                        border: `1px solid ${BORDER}`,
+                        borderRadius: 6,
+                        padding: "10px 10px 8px",
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          marginBottom: 6,
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontSize: 11,
+                            fontWeight: 700,
+                            color: CYAN,
+                          }}
+                        >
+                          PLOT #{plot.id}
+                        </span>
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 6,
+                          }}
+                        >
+                          <span
+                            style={{
+                              fontSize: 8,
+                              padding: "2px 6px",
+                              borderRadius: 3,
+                              background: `${
+                                BIOME_COLORS[plot.biome] ?? "#666"
+                              }22`,
+                              border: `1px solid ${
+                                BIOME_COLORS[plot.biome] ?? "#666"
+                              }55`,
+                              color: BIOME_COLORS[plot.biome] ?? "#aaa",
+                              letterSpacing: 0.5,
+                            }}
+                          >
+                            {plot.biome.toUpperCase()}
+                          </span>
+                          <div
+                            style={{
+                              width: 16,
+                              height: 16,
+                              borderRadius: "50%",
+                              background: "rgba(34,197,94,0.2)",
+                              border: "1px solid #22c55e66",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              fontSize: 9,
+                            }}
+                          >
+                            ✓
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Rate + live accumulation */}
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: 8,
+                          alignItems: "center",
+                          marginBottom: 5,
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <span style={{ fontSize: 8, color: GOLD }}>
+                          {plot.dayRate.toFixed(1)} FRNTR/day
+                        </span>
+                        {plot.unlockedEdge > 0 && (
+                          <span
+                            style={{
+                              fontSize: 7.5,
+                              padding: "1px 5px",
+                              borderRadius: 3,
+                              background: "rgba(0,255,204,0.08)",
+                              border: `1px solid ${BORDER}`,
+                              color: CYAN_DIM,
+                              letterSpacing: 0.5,
+                            }}
+                          >
+                            +{plot.unlockedEdge} sub-parcels
+                          </span>
+                        )}
+                      </div>
+
+                      <div
+                        style={{
+                          fontSize: 9,
+                          color: CYAN,
+                          marginBottom: 7,
+                          fontVariantNumeric: "tabular-nums",
+                        }}
+                      >
+                        {Number.isNaN(plot.accumulated)
+                          ? "0.0000"
+                          : plot.accumulated.toFixed(4)}{" "}
+                        FRNTR accumulated
+                      </div>
+
+                      <button
+                        type="button"
+                        data-ocid={`command_center.mine.button.${i + 1}`}
+                        onClick={() => claimResources(plot.id)}
+                        style={{
+                          width: "100%",
+                          padding: "6px",
+                          background: "transparent",
+                          border: `1px solid ${CYAN}55`,
+                          borderRadius: 4,
+                          color: CYAN,
+                          fontSize: 8.5,
+                          fontWeight: 700,
+                          letterSpacing: 1,
+                          cursor: "pointer",
+                        }}
+                      >
+                        ⛏ COLLECT RESOURCES
+                      </button>
+                    </div>
+                  ))}
+                  {filtered.length === 0 && searchQuery !== "" && (
+                    <div
+                      data-ocid="command_center.territories.empty_state"
+                      style={{
+                        textAlign: "center",
+                        padding: "20px",
+                        color: CYAN_DIM,
+                        fontSize: 9,
+                        letterSpacing: 1,
+                      }}
+                    >
+                      NO PLOTS MATCH YOUR SEARCH
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* MINERALS */}
+          <div style={{ marginTop: 16 }}>
+            <div
+              style={{
+                fontSize: 9,
+                fontWeight: 700,
+                color: CYAN,
+                letterSpacing: 2,
+                marginBottom: 8,
+              }}
+            >
+              MINERALS
+            </div>
+            {(() => {
+              const totalTickRate = player.plotsOwned.reduce((acc, plotId) => {
+                const plot = plots.find((p) => p.id === plotId);
+                if (!plot) return acc;
+                const subParcelsForPlot = getSubParcels(plotId);
+                const hasReactor = subParcelsForPlot.some(
+                  (sp) => sp.buildingType === "CYCLES_REACTOR",
+                );
+                if (!hasReactor) return acc;
+                const tier = BIOME_TIER[plot.biome] ?? 1;
+                const rate = TIER_MINERALS[tier] ?? TIER_MINERALS[1];
+                return acc + rate.tickRate;
+              }, 0);
+
+              const mineralRows = [
+                {
+                  key: "iron" as const,
+                  icon: "⚙",
+                  label: "IRON",
+                  color: "#9ca3af",
+                  value: player.iron,
+                },
+                {
+                  key: "fuel" as const,
+                  icon: "⛽",
+                  label: "FUEL",
+                  color: "#f97316",
+                  value: player.fuel,
+                },
+                {
+                  key: "crystal" as const,
+                  icon: "💎",
+                  label: "CRYSTAL",
+                  color: "#00ffcc",
+                  value: player.crystal,
+                },
+              ];
+
+              return mineralRows.map((m) => (
+                <div
+                  key={m.key}
+                  style={{
+                    background: "rgba(0,255,204,0.03)",
+                    border: "1px solid rgba(0,255,204,0.12)",
                     borderRadius: 6,
-                    padding: "10px 10px 8px",
+                    padding: "9px 10px",
+                    marginBottom: 6,
                   }}
                 >
                   <div
                     style={{
                       display: "flex",
-                      justifyContent: "space-between",
                       alignItems: "center",
-                      marginBottom: 6,
+                      justifyContent: "space-between",
+                      marginBottom: 5,
                     }}
                   >
                     <span
-                      style={{ fontSize: 11, fontWeight: 700, color: CYAN }}
+                      style={{
+                        fontSize: 10,
+                        color: m.color,
+                        fontFamily: "monospace",
+                        letterSpacing: 1,
+                      }}
                     >
-                      PLOT #{plot.id}
+                      {m.icon} {m.label}
                     </span>
                     <div
-                      style={{ display: "flex", alignItems: "center", gap: 6 }}
+                      style={{ display: "flex", alignItems: "center", gap: 8 }}
                     >
                       <span
                         style={{
+                          fontSize: 11,
+                          fontWeight: 700,
+                          color: m.color,
+                          fontVariantNumeric: "tabular-nums",
+                        }}
+                      >
+                        {m.value}
+                      </span>
+                      <span
+                        style={{
                           fontSize: 8,
-                          padding: "2px 6px",
-                          borderRadius: 3,
-                          background: `${BIOME_COLORS[plot.biome] ?? "#666"}22`,
-                          border: `1px solid ${BIOME_COLORS[plot.biome] ?? "#666"}55`,
-                          color: BIOME_COLORS[plot.biome] ?? "#aaa",
+                          color: "rgba(160,200,220,0.5)",
                           letterSpacing: 0.5,
                         }}
                       >
-                        {plot.biome.toUpperCase()}
+                        +{totalTickRate}/tick
                       </span>
-                      <div
-                        style={{
-                          width: 16,
-                          height: 16,
-                          borderRadius: "50%",
-                          background: "rgba(34,197,94,0.2)",
-                          border: "1px solid #22c55e66",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          fontSize: 9,
-                        }}
-                      >
-                        ✓
-                      </div>
                     </div>
                   </div>
                   <div
                     style={{
-                      display: "flex",
-                      gap: 8,
-                      alignItems: "center",
-                      marginBottom: 5,
-                      flexWrap: "wrap",
+                      height: 4,
+                      background: "rgba(255,255,255,0.06)",
+                      borderRadius: 2,
+                      overflow: "hidden",
                     }}
                   >
-                    <span style={{ fontSize: 8, color: "#94a3b8" }}>
-                      ⚔ {plot.iron}
-                    </span>
-                    <span style={{ fontSize: 8, color: "#f97316" }}>
-                      🔧 {plot.fuel}
-                    </span>
-                    <span style={{ fontSize: 8, color: "#3b82f6" }}>
-                      💎 {plot.crystal}
-                    </span>
-                    <span style={{ fontSize: 8, color: GOLD }}>
-                      {plot.frntDay} FRNTR/day
-                    </span>
-                    <span
+                    <div
                       style={{
-                        fontSize: 7.5,
-                        padding: "1px 5px",
-                        borderRadius: 3,
-                        background: "rgba(0,255,204,0.1)",
-                        border: `1px solid ${BORDER}`,
-                        color: CYAN_DIM,
-                        letterSpacing: 0.5,
+                        height: "100%",
+                        width: `${Math.min(100, (m.value / 500) * 100)}%`,
+                        background: m.color,
+                        borderRadius: 2,
+                        transition: "width 0.6s ease-out",
+                        boxShadow: `0 0 6px ${m.color}66`,
                       }}
-                    >
-                      LVL {plot.level}
-                    </span>
+                    />
                   </div>
-                  <div style={{ fontSize: 9, color: CYAN, marginBottom: 7 }}>
-                    {plot.frntAcc} FRNTR accumulated
-                  </div>
-                  <button
-                    type="button"
-                    data-ocid={`command_center.mine.button.${i + 1}`}
+                  <div
                     style={{
-                      width: "100%",
-                      padding: "6px",
-                      background: "transparent",
-                      border: `1px solid ${CYAN}55`,
-                      borderRadius: 4,
-                      color: CYAN,
-                      fontSize: 8.5,
-                      fontWeight: 700,
-                      letterSpacing: 1,
-                      cursor: "pointer",
+                      fontSize: 7.5,
+                      color: "rgba(160,200,220,0.35)",
+                      marginTop: 3,
+                      letterSpacing: 0.3,
                     }}
                   >
-                    ⛏ MINE RESOURCES
-                  </button>
+                    USED FOR: {MINERAL_USES[m.key]}
+                  </div>
                 </div>
-              ))}
-              {filtered.length === 0 && (
-                <div
-                  data-ocid="command_center.territories.empty_state"
-                  style={{
-                    textAlign: "center",
-                    padding: "20px",
-                    color: CYAN_DIM,
-                    fontSize: 9,
-                    letterSpacing: 1,
-                  }}
-                >
-                  NO PLOTS MATCH YOUR SEARCH
-                </div>
-              )}
-            </div>
+              ));
+            })()}
           </div>
         </div>
       </div>
