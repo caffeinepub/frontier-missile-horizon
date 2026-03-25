@@ -109,6 +109,13 @@ export interface SubParcel {
   durability: number;
 }
 
+export interface PlotHoverCard {
+  plotId: number;
+  owner: string;
+  action: string;
+  nextStep: string;
+}
+
 function generateSubParcels(plotId: number): SubParcel[] {
   return [
     {
@@ -255,11 +262,13 @@ interface GameState {
   plots: PlotData[];
   player: PlayerData;
   selectedPlotId: number | null;
+  targetPlotId: number | null;
   combatLog: CombatEntry[];
   leaderboard: LeaderEntry[];
   orbitalEvent: OrbitalEvent | null;
   subParcels: Record<number, SubParcel[]>;
   activeWeapon: string | null;
+  plotHoverCard: PlotHoverCard | null;
 
   selectPlot: (id: number | null) => void;
   purchasePlot: (id: number) => void;
@@ -274,6 +283,8 @@ interface GameState {
     cost: number,
   ) => void;
   setActiveWeapon: (weapon: string | null) => void;
+  setTargetPlotId: (id: number | null) => void;
+  setPlotHoverCard: (card: PlotHoverCard | null) => void;
 }
 
 export const useGameStore = create<GameState>((set, get) => ({
@@ -290,6 +301,7 @@ export const useGameStore = create<GameState>((set, get) => ({
     commanderDef: 0,
   },
   selectedPlotId: null,
+  targetPlotId: null,
   combatLog: generateCombatLog(),
   leaderboard: generateLeaderboard(),
   orbitalEvent: {
@@ -299,10 +311,15 @@ export const useGameStore = create<GameState>((set, get) => ({
   },
   subParcels: {},
   activeWeapon: null,
+  plotHoverCard: null,
 
   selectPlot: (id) => set({ selectedPlotId: id }),
 
   setActiveWeapon: (weapon) => set({ activeWeapon: weapon }),
+
+  setTargetPlotId: (id) => set({ targetPlotId: id }),
+
+  setPlotHoverCard: (card) => set({ plotHoverCard: card }),
 
   getSubParcels: (plotId) => {
     const state = get();

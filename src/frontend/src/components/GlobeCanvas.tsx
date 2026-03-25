@@ -202,73 +202,267 @@ interface MissileProps {
   onComplete: () => void;
 }
 
+function bezierPoint(
+  p0: THREE.Vector3,
+  p1: THREE.Vector3,
+  p2: THREE.Vector3,
+  t: number,
+): THREE.Vector3 {
+  const q0 = p0.clone().lerp(p1, t);
+  const q1 = p1.clone().lerp(p2, t);
+  return q0.lerp(q1, t);
+}
+
 function MissileAnimation({ active, onComplete }: MissileProps) {
   const progressRef = useRef(0);
-  const headRef = useRef<THREE.Mesh>(null);
-  const flashRef = useRef<THREE.Mesh>(null);
   const completedRef = useRef(false);
+  const missileRef = useRef<THREE.Mesh>(null);
+  const exhaustRef = useRef<THREE.Points>(null);
+  const shockwaveRef = useRef<THREE.Mesh>(null);
+  const flashRef = useRef<THREE.Mesh>(null);
+  const shockwaveStartRef = useRef(0);
+  const postImpactTimerRef = useRef(0);
 
   const srcPlot = useMemo(() => latLngToXYZ(40.7, -74, 1.0), []);
-  const dstPlot = useMemo(() => latLngToXYZ(51.5, 0, 1.0), []);
+  const dstPlot = useMemo(() => latLngToXYZ(51.5, 0.0, 1.0), []);
+  const ctrlPt = useMemo(
+    () => srcPlot.clone().lerp(dstPlot, 0.5).normalize().multiplyScalar(2.5),
+    [srcPlot, dstPlot],
+  );
 
-  useFrame((_, delta) => {
+  // Build exhaust particle geometry once
+  const exhaustGeo = useMemo(() => {
+    const geo = new THREE.BufferGeometry();
+    const N = 20;
+    const positions = new Float32Array(N * 3);
+    geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    return geo;
+  }, []);
+
+  const exhaustMat = useMemo(
+    () =>
+      new THREE.PointsMaterial({
+        color: 0xff6600,
+        size: 0.008,
+        transparent: true,
+        opacity: 0.85,
+        depthWrite: false,
+        sizeAttenuation: true,
+      }),
+    [],
+  );
+
+  useFrame((state, delta) => {
     if (!active) {
       progressRef.current = 0;
       completedRef.current = false;
-      if (headRef.current) headRef.current.visible = false;
+      postImpactTimerRef.current = 0;
+      shockwaveStartRef.current = 0;
+      if (missileRef.current) missileRef.current.visible = false;
+      if (exhaustRef.current) exhaustRef.current.visible = false;
+      if (shockwaveRef.current) shockwaveRef.current.visible = false;
       if (flashRef.current) flashRef.current.visible = false;
       return;
     }
 
-    progressRef.current = Math.min(progressRef.current + delta / 3.0, 1.0);
     const t = progressRef.current;
 
-    const mid = srcPlot
-      .clone()
-      .lerp(dstPlot, 0.5)
-      .normalize()
-      .multiplyScalar(1.5);
-    const p1 = new THREE.Vector3().lerpVectors(srcPlot, mid, t);
-    const p2 = new THREE.Vector3().lerpVectors(mid, dstPlot, t);
-    const pos = new THREE.Vector3().lerpVectors(p1, p2, t);
-
-    if (headRef.current) {
-      headRef.current.visible = t < 0.95;
-      headRef.current.position.copy(pos);
+    // ── Speed multiplier per phase ───────────────────────────────────
+    let speed: number;
+    if (t < 0.8) {
+      speed = 1.0 / 6.0; // normal arc phase
+    } else if (t < 0.95) {
+      speed = 0.2 / 6.0; // terminal slow-down
+    } else {
+      speed = 1.5 / 6.0; // snap to impact
     }
 
-    if (flashRef.current) {
-      if (t >= 0.95) {
-        flashRef.current.visible = true;
-        flashRef.current.position.copy(dstPlot);
-        flashRef.current.scale.setScalar((t - 0.95) * 6);
-        const mat = flashRef.current.material as THREE.MeshBasicMaterial;
-        mat.opacity = Math.max(0, 1 - (t - 0.95) * 20);
-      } else {
-        flashRef.current.visible = false;
+    if (t < 1.0) {
+      progressRef.current = Math.min(t + delta * speed, 1.0);
+    }
+
+    const pos = bezierPoint(srcPlot, ctrlPt, dstPlot, t);
+
+    // ── LAUNCH corkscrew (0–15%) ────────────────────────────────────
+    if (t <= 0.15 && missileRef.current) {
+      const spiralOffset = new THREE.Vector3(
+        Math.sin(t * 80) * 0.012 * (1 - t / 0.15),
+        0,
+        Math.cos(t * 80) * 0.012 * (1 - t / 0.15),
+      );
+      missileRef.current.visible = true;
+      missileRef.current.position.copy(pos.clone().add(spiralOffset));
+      const mat = missileRef.current.material as THREE.MeshStandardMaterial;
+      mat.emissiveIntensity = 2.0;
+    }
+
+    // ── ARC + TERMINAL phases (15–95%) ─────────────────────────────
+    if (t > 0.15 && t < 0.95 && missileRef.current) {
+      missileRef.current.visible = true;
+      missileRef.current.position.copy(pos);
+      const mat = missileRef.current.material as THREE.MeshStandardMaterial;
+      // Heat buildup in terminal phase
+      mat.emissiveIntensity = t > 0.8 ? 2.0 + (t - 0.8) * 30 : 2.5;
+    }
+
+    // ── Exhaust trail ───────────────────────────────────────────────
+    if (t < 0.95 && exhaustRef.current) {
+      exhaustRef.current.visible = true;
+      const attr = exhaustGeo.getAttribute("position") as THREE.BufferAttribute;
+      const arr = attr.array as Float32Array;
+      const N = 20;
+      for (let i = 0; i < N; i++) {
+        const backT = Math.max(0, t - i * 0.008);
+        const bp = bezierPoint(srcPlot, ctrlPt, dstPlot, backT);
+        const jitter = (Math.random() - 0.5) * 0.004;
+        arr[i * 3] = bp.x + jitter;
+        arr[i * 3 + 1] = bp.y + jitter;
+        arr[i * 3 + 2] = bp.z + jitter;
+      }
+      attr.needsUpdate = true;
+      exhaustRef.current.geometry = exhaustGeo;
+      const age = 1 - t / 0.95;
+      exhaustMat.color.setHex(t < 0.15 ? 0xffffff : 0xff6600);
+      exhaustMat.opacity = 0.7 * age + 0.3;
+    }
+
+    // ── IMPACT (95–100%) ────────────────────────────────────────────
+    if (t >= 0.95) {
+      if (missileRef.current) missileRef.current.visible = false;
+      if (exhaustRef.current) exhaustRef.current.visible = false;
+
+      // Shockwave
+      if (shockwaveRef.current) {
+        if (shockwaveStartRef.current === 0) {
+          shockwaveStartRef.current = state.clock.getElapsedTime();
+        }
+        const elapsed =
+          state.clock.getElapsedTime() - shockwaveStartRef.current;
+        shockwaveRef.current.visible = elapsed < 1.0;
+        const s = Math.min(elapsed * 3.5, 3.0);
+        shockwaveRef.current.position.copy(dstPlot);
+        shockwaveRef.current.lookAt(0, 0, 0);
+        shockwaveRef.current.scale.setScalar(s);
+        const swMat = shockwaveRef.current.material as THREE.MeshBasicMaterial;
+        swMat.opacity = Math.max(0, 1 - elapsed * 1.5);
+      }
+
+      // Flash sphere
+      if (flashRef.current) {
+        if (shockwaveStartRef.current > 0) {
+          const elapsed =
+            state.clock.getElapsedTime() - shockwaveStartRef.current;
+          flashRef.current.visible = elapsed < 0.5;
+          flashRef.current.position.copy(dstPlot);
+          const s = Math.min(elapsed * 3, 0.5);
+          flashRef.current.scale.setScalar(s);
+          const fm = flashRef.current.material as THREE.MeshBasicMaterial;
+          fm.opacity = Math.max(0, 1 - elapsed * 4);
+        }
       }
     }
 
+    // ── Post-impact → call onComplete after 1.5s ────────────────────
     if (t >= 1.0 && !completedRef.current) {
-      completedRef.current = true;
-      onComplete();
+      postImpactTimerRef.current += delta;
+      if (postImpactTimerRef.current >= 1.5) {
+        completedRef.current = true;
+        onComplete();
+      }
     }
+
+    // ── Camera tracking ─────────────────────────────────────────────
+    // This is handled by CameraAnimator; nothing extra needed here
   });
 
   if (!active) return null;
 
   return (
     <group>
-      <mesh ref={headRef}>
-        <sphereGeometry args={[0.012, 8, 8]} />
-        <meshBasicMaterial color={0xff8800} />
+      {/* Missile body */}
+      <mesh ref={missileRef}>
+        <cylinderGeometry args={[0.006, 0.003, 0.04, 6]} />
+        <meshStandardMaterial
+          color={0xffffff}
+          emissive={0xffffff}
+          emissiveIntensity={2.5}
+        />
       </mesh>
+
+      {/* Exhaust particles */}
+      <points ref={exhaustRef} geometry={exhaustGeo} material={exhaustMat} />
+
+      {/* Shockwave ring */}
+      <mesh ref={shockwaveRef}>
+        <torusGeometry args={[0.05, 0.005, 6, 32]} />
+        <meshBasicMaterial
+          color={0xff4400}
+          transparent
+          opacity={1}
+          depthWrite={false}
+        />
+      </mesh>
+
+      {/* Impact flash */}
       <mesh ref={flashRef}>
         <sphereGeometry args={[0.05, 12, 12]} />
-        <meshBasicMaterial color={0xff4400} transparent opacity={1} />
+        <meshBasicMaterial
+          color={0xffffff}
+          transparent
+          opacity={1}
+          depthWrite={false}
+        />
       </mesh>
     </group>
   );
+}
+
+interface CameraAnimatorProps {
+  controlsRef: React.MutableRefObject<any>;
+}
+
+function CameraAnimator({ controlsRef }: CameraAnimatorProps) {
+  const { camera } = useThree();
+  const selectedPlotId = useGameStore((s) => s.selectedPlotId);
+  const plots = useGameStore((s) => s.plots);
+
+  const targetPosRef = useRef<THREE.Vector3 | null>(null);
+  const prevPlotIdRef = useRef<number | null>(null);
+  const animatingRef = useRef(false);
+
+  // When selectedPlotId changes, compute new target
+  if (selectedPlotId !== prevPlotIdRef.current) {
+    prevPlotIdRef.current = selectedPlotId;
+    if (selectedPlotId !== null && plots[selectedPlotId]) {
+      const plot = plots[selectedPlotId];
+      const dir = latLngToXYZ(plot.lat, plot.lng, 1.0).normalize();
+      targetPosRef.current = dir.multiplyScalar(2.0);
+      animatingRef.current = true;
+      if (controlsRef.current) {
+        controlsRef.current.autoRotate = false;
+      }
+    }
+  }
+
+  useFrame((_, delta) => {
+    if (!animatingRef.current || !targetPosRef.current) return;
+
+    const target = targetPosRef.current;
+    const speed = 3 * delta;
+    camera.position.lerp(target, speed);
+
+    if (controlsRef.current) {
+      controlsRef.current.update();
+    }
+
+    // Stop animating when close enough
+    if (camera.position.distanceTo(target) < 0.005) {
+      camera.position.copy(target);
+      animatingRef.current = false;
+    }
+  });
+
+  return null;
 }
 
 interface SceneProps {
@@ -306,6 +500,8 @@ function GlobeScene({
         autoRotate
         autoRotateSpeed={0.2}
       />
+
+      <CameraAnimator controlsRef={controlsRef} />
 
       <MissileAnimation active={missileActive} onComplete={onMissileComplete} />
     </>
