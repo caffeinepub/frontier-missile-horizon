@@ -297,16 +297,9 @@ const earthDayNightVert = /* glsl */ `
 
 const earthDayNightFrag = /* glsl */ `
   uniform sampler2D dayMap;
-  uniform sampler2D nightMap;
-  uniform vec3 sunDir;
-  varying vec3 vWorldNormal;
   varying vec2 vUv;
   void main() {
-    float lit = dot(normalize(vWorldNormal), normalize(sunDir));
-    float t = smoothstep(-0.2, 0.3, lit);
-    vec4 day = texture2D(dayMap, vUv);
-    vec4 night = texture2D(nightMap, vUv) * 2.5;
-    gl_FragColor = mix(night, day, t);
+    gl_FragColor = texture2D(dayMap, vUv);
   }
 `;
 
@@ -314,10 +307,9 @@ const earthDayNightFrag = /* glsl */ `
 // EarthSphere — globe mesh + hex grid + click handling
 // ---------------------------------------------------------------------------
 function EarthSphere() {
-  const [dayTex, cloudsTex, nightTex] = useTexture([
+  const [dayTex, cloudsTex] = useTexture([
     "/assets/generated/earth-day.dim_4096x2048.jpg",
     "/assets/generated/earth-clouds.dim_2048x1024.jpg",
-    "/assets/generated/earth-night-lights.dim_2048x1024.jpg",
   ]);
   const globeRef = useRef<THREE.Group>(null);
   const cloudsRef = useRef<THREE.Mesh>(null);
@@ -335,10 +327,8 @@ function EarthSphere() {
   const earthUniforms = useMemo(
     () => ({
       dayMap: { value: dayTex },
-      nightMap: { value: nightTex },
-      sunDir: { value: new THREE.Vector3(5, 3, 5).normalize() },
     }),
-    [dayTex, nightTex],
+    [dayTex],
   );
 
   useFrame(() => {
@@ -1255,8 +1245,7 @@ function GlobeScene({
 }: SceneProps) {
   return (
     <>
-      <ambientLight color={0x334455} intensity={0.4} />
-      <directionalLight color={0xffffff} intensity={1.8} position={[5, 3, 5]} />
+      <ambientLight color={0xffffff} intensity={2.5} />
       <Suspense fallback={null}>
         <Starfield />
         <EarthSphere />
