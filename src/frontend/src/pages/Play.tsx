@@ -283,13 +283,7 @@ function SheetContent({
   const combatLog = useGameStore((s) => s.combatLog);
 
   if (tab === "map") {
-    return (
-      <MapBottomSheet
-        onClose={onClose}
-        controlsRef={controlsRef}
-        onFireMissile={onFireMissile}
-      />
-    );
+    return <MapBottomSheet onClose={onClose} controlsRef={controlsRef} />;
   }
 
   if (tab === "inventory") {

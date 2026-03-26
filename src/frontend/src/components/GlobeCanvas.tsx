@@ -317,6 +317,9 @@ function EarthSphere() {
   const selectPlot = useGameStore((s) => s.selectPlot);
   const setSelectedWorldPoint = useGameStore((s) => s.setSelectedWorldPoint);
   const setHoveredPlotId = useGameStore((s) => s.setHoveredPlotId);
+  const compareModeActive = useGameStore((s) => s.compareModeActive);
+  const setComparePlotId = useGameStore((s) => s.setComparePlotId);
+  // setCompareModeActive available via store if needed
   const lastMoveTime = useRef(0);
 
   const atmosphereUniforms = useMemo(
@@ -356,6 +359,11 @@ function EarthSphere() {
   const handleClick = (e: any) => {
     e.stopPropagation();
     const nearest = findNearestPlot(e.point);
+    if (compareModeActive) {
+      // In compare mode: set the compare plot and exit compare mode selection
+      setComparePlotId(nearest);
+      return;
+    }
     selectPlot(nearest);
     // Store the actual world-space click direction × orbit distance.
     // CameraAnimator uses this directly — no lat/lng recomputation needed,

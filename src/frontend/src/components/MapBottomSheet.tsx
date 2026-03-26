@@ -14,10 +14,6 @@ import type { LucideIcon } from "lucide-react";
 import type React from "react";
 import { useEffect, useState } from "react";
 import { getMineralYield, projectedMonthlyYield } from "../constants/minerals";
-import type { MissileConfig } from "../constants/missiles";
-import { MISSILE_CONFIGS } from "../constants/missiles";
-import { useArsenalAudio } from "../hooks/useArsenalAudio";
-import { useLaunchMissile } from "../hooks/useLaunchMissile";
 import { usePurchasePlot } from "../hooks/usePurchasePlot";
 import {
   type PlotSpecialization,
@@ -25,6 +21,8 @@ import {
   useGameStore,
 } from "../store/gameStore";
 import BuildingPicker from "./BuildingPicker";
+import PlotComparisonView from "./PlotComparisonView";
+import TacticalCommandPanel from "./TacticalCommandPanel";
 
 const CYAN = "#00ffcc";
 const CYAN_DIM = "rgba(0,255,204,0.5)";
@@ -296,164 +294,9 @@ function SlotRow({
   );
 }
 
-function QuickLaunchPanel({
-  onFireMissile,
-}: {
-  onFireMissile: (missile: MissileConfig) => void;
-}) {
-  const arsenalInventory = useGameStore((s) => s.arsenalInventory);
-  const { playMissileAudio } = useArsenalAudio();
-  const { launchMissile, isLaunching } = useLaunchMissile();
-  const [firingId, setFiringId] = useState<string | null>(null);
-  const [statusMap, setStatusMap] = useState<
-    Record<string, { success: boolean; message: string }>
-  >({});
-
-  const available = MISSILE_CONFIGS.filter(
-    (m) => (arsenalInventory[m.id] ?? 0) > 0,
-  ).slice(0, 3);
-
-  if (available.length === 0) return null;
-
-  async function handleQuickFire(missile: MissileConfig) {
-    if (firingId) return; // prevent double-tap while one is in flight
-    setFiringId(missile.id);
-    playMissileAudio(missile.id, "launch");
-    onFireMissile(missile);
-    const result = await launchMissile(missile);
-    setStatusMap((prev) => ({ ...prev, [missile.id]: result }));
-    // Clear status after 3s
-    setTimeout(() => {
-      setStatusMap((prev) => {
-        const next = { ...prev };
-        delete next[missile.id];
-        return next;
-      });
-    }, 3000);
-    setFiringId(null);
-  }
-
-  return (
-    <div
-      data-ocid="map.quicklaunch.panel"
-      style={{
-        padding: "10px 14px",
-        borderTop: `1px solid ${BORDER}`,
-        flexShrink: 0,
-      }}
-    >
-      <div
-        style={{
-          fontSize: 8,
-          color: CYAN_DIM,
-          letterSpacing: 2,
-          marginBottom: 8,
-          fontFamily: "monospace",
-          display: "flex",
-          alignItems: "center",
-          gap: 4,
-        }}
-      >
-        <Zap size={10} color={"#f97316"} />
-        QUICK LAUNCH
-      </div>
-      <div
-        style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 2 }}
-      >
-        {available.map((missile) => {
-          const status = statusMap[missile.id];
-          const isFiring = firingId === missile.id;
-          return (
-            <div
-              key={missile.id}
-              style={{
-                flexShrink: 0,
-                background: "rgba(0,0,0,0.3)",
-                border: `1px solid ${missile.accentColor}55`,
-                borderRadius: 6,
-                padding: "6px 8px",
-                minWidth: 90,
-              }}
-            >
-              <div
-                style={{
-                  fontSize: 8,
-                  fontWeight: 700,
-                  color: missile.accentColor,
-                  letterSpacing: 0.5,
-                  fontFamily: "monospace",
-                  marginBottom: 4,
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {missile.name}
-              </div>
-              {status && (
-                <div
-                  style={{
-                    fontSize: 7,
-                    color: status.success ? "#22c55e" : "#ef4444",
-                    fontFamily: "monospace",
-                    marginBottom: 3,
-                    letterSpacing: 0.5,
-                  }}
-                >
-                  {status.success ? "✓ LAUNCHED" : "✗ FAILED"}
-                </div>
-              )}
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  gap: 4,
-                }}
-              >
-                <span
-                  style={{
-                    fontSize: 8,
-                    color: CYAN_DIM,
-                    fontFamily: "monospace",
-                  }}
-                >
-                  ×{arsenalInventory[missile.id] ?? 0}
-                </span>
-                <button
-                  type="button"
-                  data-ocid={`map.quicklaunch.${missile.id.toLowerCase()}.button`}
-                  onClick={() => handleQuickFire(missile)}
-                  disabled={isFiring || isLaunching}
-                  style={{
-                    fontSize: 7,
-                    fontWeight: 700,
-                    letterSpacing: 1,
-                    padding: "3px 6px",
-                    borderRadius: 3,
-                    background: isFiring
-                      ? "rgba(239,68,68,0.25)"
-                      : "rgba(239,68,68,0.15)",
-                    border: "1px solid #ef4444",
-                    color: "#ef4444",
-                    cursor: isFiring ? "not-allowed" : "pointer",
-                    fontFamily: "monospace",
-                    opacity: isFiring ? 0.6 : 1,
-                  }}
-                >
-                  {isFiring ? "⋯" : "FIRE"}
-                </button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 interface MapBottomSheetProps {
   onClose: () => void;
   controlsRef?: React.RefObject<any>;
-  onFireMissile?: (missile: MissileConfig) => void;
 }
 
 interface SurveyReportProps {
@@ -776,7 +619,6 @@ function SurveyReport({
 export default function MapBottomSheet({
   onClose,
   controlsRef,
-  onFireMissile,
 }: MapBottomSheetProps) {
   const [pickerSlot, setPickerSlot] = useState<number | null>(null);
   const [purchaseError, setPurchaseError] = useState<string | null>(null);
@@ -821,7 +663,7 @@ export default function MapBottomSheet({
     (sp) => sp.subId !== 0 && sp.unlocked && !sp.buildingType,
   );
 
-  const hasSilo = subParcels.some((sp) => sp.buildingType === "MISSILE_SILO");
+  // hasSilo used by TacticalCommandPanel directly
 
   async function handlePurchase() {
     if (!plot || isPurchasing) return;
@@ -1231,10 +1073,11 @@ export default function MapBottomSheet({
           )}
         </div>
 
-        {/* QUICK LAUNCH — only if plot has a silo and handler is provided */}
-        {plot && isOwnPlot && hasSilo && onFireMissile && (
-          <QuickLaunchPanel onFireMissile={onFireMissile} />
-        )}
+        {/* TACTICAL COMMAND PANEL — always shown when plot is selected */}
+        {plot && <TacticalCommandPanel />}
+
+        {/* PLOT COMPARISON OVERLAY */}
+        <PlotComparisonView />
 
         {/* DECISION LAYER */}
         {plot && (
