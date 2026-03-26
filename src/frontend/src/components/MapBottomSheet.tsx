@@ -22,7 +22,6 @@ import {
 } from "../store/gameStore";
 import BuildingPicker from "./BuildingPicker";
 import PlotComparisonView from "./PlotComparisonView";
-import TacticalCommandPanel from "./TacticalCommandPanel";
 
 const CYAN = "#00ffcc";
 const CYAN_DIM = "rgba(0,255,204,0.5)";
@@ -663,8 +662,6 @@ export default function MapBottomSheet({
     (sp) => sp.subId !== 0 && sp.unlocked && !sp.buildingType,
   );
 
-  // hasSilo used by TacticalCommandPanel directly
-
   async function handlePurchase() {
     if (!plot || isPurchasing) return;
     if (player.frntBalance < 100) return;
@@ -1072,9 +1069,6 @@ export default function MapBottomSheet({
             </>
           )}
         </div>
-
-        {/* TACTICAL COMMAND PANEL — always shown when plot is selected */}
-        {plot && <TacticalCommandPanel />}
 
         {/* PLOT COMPARISON OVERLAY */}
         <PlotComparisonView />
